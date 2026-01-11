@@ -507,6 +507,18 @@ const EditChannelModal = (props) => {
     //setAutoBan
   };
 
+  const formatJsonField = (fieldName) => {
+    const rawValue = (inputs?.[fieldName] ?? '').trim();
+    if (!rawValue) return;
+
+    try {
+      const parsed = JSON.parse(rawValue);
+      handleInputChange(fieldName, JSON.stringify(parsed, null, 2));
+    } catch (error) {
+      showError(`${t('JSON格式错误')}: ${error.message}`);
+    }
+  };
+
   const loadChannel = async () => {
     setLoading(true);
     let res = await API.get(`/api/channel/${channelId}`);
@@ -2826,6 +2838,12 @@ const EditChannelModal = (props) => {
                           >
                             {t('新格式模板')}
                           </Text>
+                          <Text
+                            className='!text-semi-color-primary cursor-pointer'
+                            onClick={() => formatJsonField('param_override')}
+                          >
+                            {t('格式化')}
+                          </Text>
                         </div>
                       }
                       showClear
@@ -2871,6 +2889,12 @@ const EditChannelModal = (props) => {
                               }
                             >
                               {t('填入模板')}
+                            </Text>
+                            <Text
+                              className='!text-semi-color-primary cursor-pointer'
+                              onClick={() => formatJsonField('header_override')}
+                            >
+                              {t('格式化')}
                             </Text>
                           </div>
                           <div>
