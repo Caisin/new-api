@@ -344,6 +344,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	var httpResp *http.Response
 	if resp != nil {
 		httpResp = resp.(*http.Response)
+		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
 		if httpResp.StatusCode != http.StatusOK {
 			err := service.RelayErrorHandler(c.Request.Context(), httpResp, true)
 			common.SysError(fmt.Sprintf(
