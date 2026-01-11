@@ -1225,6 +1225,7 @@
     "新建数量": "Nouvelle quantité",
     "新建组": "Nouveau groupe",
     "新格式（支持条件判断与json自定义）：": "Nouveau format (prend en charge les conditions et la personnalisation JSON) :",
+    "新格式（支持 overrides 批量覆盖）：": "Nouveau format (prend en charge les overrides en lot) :",
     "新格式模板": "Modèle de nouveau format",
     "新版本": "Nouvelle version",
     "新用户使用邀请码奖励额度": "Quota de bonus de code d'invitation pour nouvel utilisateur",

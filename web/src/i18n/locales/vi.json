@@ -1211,6 +1211,7 @@
     "新建数量": "Số lượng mới",
     "新建组": "Nhóm mới",
     "新格式（支持条件判断与json自定义）：": "Định dạng mới (hỗ trợ phán đoán điều kiện và tùy chỉnh JSON):",
+    "新格式（支持 overrides 批量覆盖）：": "Định dạng mới (hỗ trợ overrides hàng loạt):",
     "新格式模板": "Mẫu định dạng mới",
     "新版本": "Phiên bản mới",
     "新用户使用邀请码奖励额度": "Hạn ngạch thưởng mã mời người dùng mới",

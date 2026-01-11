@@ -510,6 +510,36 @@ func TestApplyParamOverrideConditionFromContext(t *testing.T) {
 	assertJSONEqual(t, `{"temperature":0.1}`, string(out))
 }
 
+func TestApplyParamOverrideOverridesDefaultMode(t *testing.T) {
+	input := []byte(`{"model":"gpt-4","temperature":0.7,"top_p":1}`)
+	override := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{
+				"path":  "temperature",
+				"mode":  "set",
+				"value": 0.1,
+				"overrides": []interface{}{
+					map[string]interface{}{
+						"k": "top_p",
+						"v": 0.9,
+					},
+				},
+				"condition": map[string]interface{}{
+					"path":  "model",
+					"mode":  "prefix",
+					"value": "gpt",
+				},
+			},
+		},
+	}
+
+	out, err := ApplyParamOverride(input, override, nil)
+	if err != nil {
+		t.Fatalf("ApplyParamOverride returned error: %v", err)
+	}
+	assertJSONEqual(t, `{"model":"gpt-4","temperature":0.1,"top_p":0.9}`, string(out))
+}
+
 func TestApplyParamOverrideNegativeIndexPath(t *testing.T) {
 	input := []byte(`{"arr":[{"model":"a"},{"model":"b"}]}`)
 	override := map[string]interface{}{

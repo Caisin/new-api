@@ -1215,6 +1215,7 @@
     "新建数量": "New quantity",
     "新建组": "New group",
     "新格式（支持条件判断与json自定义）：": "New format (supports conditional judgment and JSON customization):",
+    "新格式（支持 overrides 批量覆盖）：": "New format (supports batch overrides):",
     "新格式模板": "New format template",
     "新版本": "New Version",
     "新用户使用邀请码奖励额度": "New user invitation code bonus quota",

@@ -2788,7 +2788,10 @@ const EditChannelModal = (props) => {
                         '\n{\n  "temperature": 0,\n  "max_tokens": 1000\n}' +
                         '\n\n' +
                         t('新格式（支持条件判断与json自定义）：') +
-                        '\n{\n  "operations": [\n    {\n      "path": "temperature",\n      "mode": "set",\n      "value": 0.7,\n      "conditions": [\n        {\n          "path": "model",\n          "mode": "prefix",\n          "value": "gpt"\n        }\n      ]\n    }\n  ]\n}'
+                        '\n{\n  "operations": [\n    {\n      "path": "temperature",\n      "mode": "set",\n      "value": 0.7,\n      "conditions": [\n        {\n          "path": "model",\n          "mode": "prefix",\n          "value": "gpt"\n        }\n      ]\n    }\n  ]\n}' +
+                        '\n\n' +
+                        t('新格式（支持 overrides 批量覆盖）：') +
+                        '\n{\n  "operations": [\n    {\n      "path": "temperature",\n      "mode": "set",\n      "value": 0.1,\n      "overrides": [\n        {\n          "k": "top_p",\n          "v": 0.9\n        }\n      ],\n      "condition": {\n        "path": "model",\n        "mode": "prefix",\n        "value": "gpt"\n      }\n    }\n  ]\n}'
                       }
                       autosize
                       onChange={(value) =>
@@ -2819,6 +2822,12 @@ const EditChannelModal = (props) => {
                                         path: 'temperature',
                                         mode: 'set',
                                         value: 0.7,
+                                        overrides: [
+                                          {
+                                            k: 'top_p',
+                                            v: 0.9,
+                                          },
+                                        ],
                                         conditions: [
                                           {
                                             path: 'model',
