@@ -533,7 +533,11 @@ const EditTagModal = (props) => {
               <Card className='!rounded-2xl shadow-sm border-0 mb-6'>
                 {/* Header: Advanced Settings */}
                 <div className='flex items-center mb-2'>
-                  <Avatar size='small' color='orange' className='mr-2 shadow-md'>
+                  <Avatar
+                    size='small'
+                    color='orange'
+                    className='mr-2 shadow-md'
+                  >
                     <IconSetting size={16} />
                   </Avatar>
                   <div>
@@ -549,9 +553,7 @@ const EditTagModal = (props) => {
                     field='param_override'
                     label={t('参数覆盖')}
                     placeholder={
-                      t(
-                        '此项可选，用于覆盖请求参数。不支持覆盖 stream 参数',
-                      ) +
+                      t('此项可选，用于覆盖请求参数。不支持覆盖 stream 参数') +
                       '\n' +
                       t('旧格式（直接覆盖）：') +
                       '\n{\n  "temperature": 0,\n  "max_tokens": 1000\n}' +
@@ -624,10 +626,10 @@ const EditTagModal = (props) => {
                     field='header_override'
                     label={t('请求头覆盖')}
                     placeholder={
-                      t('此项可选，用于覆盖请求头参数') +
+                      t('此项可选，用于覆盖/填充/移除请求头参数') +
                       '\n' +
                       t('格式示例：') +
-                      '\n{\n  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0",\n  "Authorization": "Bearer {api_key}"\n}'
+                      '\n{\n  "override": {\n    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0",\n    "Authorization": "Bearer {api_key}"\n  },\n  "fill": {\n    "X-Trace-Id": "trace-id"\n  },\n  "remove": ["X-Deprecated-Header"]\n}'
                     }
                     autosize
                     showClear
@@ -644,9 +646,15 @@ const EditTagModal = (props) => {
                                 'header_override',
                                 JSON.stringify(
                                   {
-                                    'User-Agent':
-                                      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0',
-                                    Authorization: 'Bearer {api_key}',
+                                    override: {
+                                      'User-Agent':
+                                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0',
+                                      Authorization: 'Bearer {api_key}',
+                                    },
+                                    fill: {
+                                      'X-Trace-Id': 'trace-id',
+                                    },
+                                    remove: ['X-Deprecated-Header'],
                                   },
                                   null,
                                   2,
@@ -672,6 +680,11 @@ const EditTagModal = (props) => {
                           <div className='text-xs text-tertiary ml-2'>
                             <div>
                               {t('渠道密钥')}: {'{api_key}'}
+                            </div>
+                            <div>
+                              {t(
+                                '结构说明：override 覆盖，fill 填充，remove 移除',
+                              )}
                             </div>
                           </div>
                         </div>
