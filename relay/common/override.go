@@ -55,7 +55,18 @@ func tryParseOperations(paramOverride map[string]interface{}) ([]ParamOperation,
 			var operations []ParamOperation
 			for _, op := range opsSlice {
 				if opMap, ok := op.(map[string]interface{}); ok {
-					operation := ParamOperation{}
+					conditions := parseConditions(opMap)
+
+					logic := "OR"
+					if logicValue, ok := opMap["logic"].(string); ok {
+						logic = logicValue
+					}
+
+					operation := ParamOperation{
+						Conditions: conditions,
+						Logic:      logic,
+					}
+					hasBase := false
 
 					// 断言必要字段
 					if path, ok := opMap["path"].(string); ok {
@@ -63,8 +74,7 @@ func tryParseOperations(paramOverride map[string]interface{}) ([]ParamOperation,
 					}
 					if mode, ok := opMap["mode"].(string); ok {
 						operation.Mode = mode
-					} else {
-						return nil, false // mode 是必需的
+						hasBase = true
 					}
 
 					// 可选字段
@@ -80,40 +90,56 @@ func tryParseOperations(paramOverride map[string]interface{}) ([]ParamOperation,
 					if to, ok := opMap["to"].(string); ok {
 						operation.To = to
 					}
-					if logic, ok := opMap["logic"].(string); ok {
-						operation.Logic = logic
-					} else {
-						operation.Logic = "OR" // 默认为OR
+
+					if hasBase {
+						operations = append(operations, operation)
 					}
 
-					// 解析条件
-					if conditions, exists := opMap["conditions"]; exists {
-						if condSlice, ok := conditions.([]interface{}); ok {
-							for _, cond := range condSlice {
-								if condMap, ok := cond.(map[string]interface{}); ok {
-									condition := ConditionOperation{}
-									if path, ok := condMap["path"].(string); ok {
-										condition.Path = path
-									}
-									if mode, ok := condMap["mode"].(string); ok {
-										condition.Mode = mode
-									}
-									if value, ok := condMap["value"]; ok {
-										condition.Value = value
-									}
-									if invert, ok := condMap["invert"].(bool); ok {
-										condition.Invert = invert
-									}
-									if passMissingKey, ok := condMap["pass_missing_key"].(bool); ok {
-										condition.PassMissingKey = passMissingKey
-									}
-									operation.Conditions = append(operation.Conditions, condition)
-								}
+					hasOverrides := false
+					if overridesValue, exists := opMap["overrides"]; exists {
+						overrideSlice, ok := overridesValue.([]interface{})
+						if !ok {
+							return nil, false
+						}
+						for _, override := range overrideSlice {
+							overrideMap, ok := override.(map[string]interface{})
+							if !ok {
+								return nil, false
 							}
+							key, ok := overrideMap["k"].(string)
+							if !ok || key == "" {
+								continue
+							}
+							overrideMode := "set"
+							if modeValue, ok := overrideMap["mode"].(string); ok && modeValue != "" {
+								overrideMode = modeValue
+							}
+							overrideOperation := ParamOperation{
+								Path:       key,
+								Mode:       overrideMode,
+								Conditions: conditions,
+								Logic:      logic,
+							}
+							if value, exists := overrideMap["v"]; exists {
+								overrideOperation.Value = value
+							}
+							if keepOrigin, ok := overrideMap["keep_origin"].(bool); ok {
+								overrideOperation.KeepOrigin = keepOrigin
+							}
+							if from, ok := overrideMap["from"].(string); ok {
+								overrideOperation.From = from
+							}
+							if to, ok := overrideMap["to"].(string); ok {
+								overrideOperation.To = to
+							}
+							operations = append(operations, overrideOperation)
+							hasOverrides = true
 						}
 					}
 
-					operations = append(operations, operation)
+					if !hasBase && !hasOverrides {
+						return nil, false
+					}
 				} else {
 					return nil, false
 				}
@@ -123,6 +149,48 @@ func tryParseOperations(paramOverride map[string]interface{}) ([]ParamOperation,
 	}
 
 	return nil, false
+}
+
+func parseConditions(opMap map[string]interface{}) []ConditionOperation {
+	var conditions []ConditionOperation
+
+	if condsValue, exists := opMap["conditions"]; exists {
+		if condSlice, ok := condsValue.([]interface{}); ok {
+			for _, cond := range condSlice {
+				if condMap, ok := cond.(map[string]interface{}); ok {
+					conditions = append(conditions, parseConditionMap(condMap))
+				}
+			}
+		}
+	}
+
+	if condValue, exists := opMap["condition"]; exists {
+		if condMap, ok := condValue.(map[string]interface{}); ok {
+			conditions = append(conditions, parseConditionMap(condMap))
+		}
+	}
+
+	return conditions
+}
+
+func parseConditionMap(condMap map[string]interface{}) ConditionOperation {
+	condition := ConditionOperation{}
+	if path, ok := condMap["path"].(string); ok {
+		condition.Path = path
+	}
+	if mode, ok := condMap["mode"].(string); ok {
+		condition.Mode = mode
+	}
+	if value, ok := condMap["value"]; ok {
+		condition.Value = value
+	}
+	if invert, ok := condMap["invert"].(bool); ok {
+		condition.Invert = invert
+	}
+	if passMissingKey, ok := condMap["pass_missing_key"].(bool); ok {
+		condition.PassMissingKey = passMissingKey
+	}
+	return condition
 }
 
 func checkConditions(jsonStr, contextJSON string, conditions []ConditionOperation, logic string) (bool, error) {
@@ -570,18 +638,19 @@ func mergeObjects(jsonStr, path string, value interface{}, keepOrigin bool) (str
 
 // BuildParamOverrideContext 提供 ApplyParamOverride 可用的上下文信息。
 // 目前内置以下字段：
-//   - model：优先使用上游模型名（UpstreamModelName），若不存在则回落到原始模型名（OriginModelName）。
-//   - upstream_model：始终为通道映射后的上游模型名。
+//   - upstream_model/model：始终为通道映射后的上游模型名。
 //   - original_model：请求最初指定的模型名。
+//   - request_path：请求路径
+//   - is_channel_test：是否为渠道测试请求（同 is_test）。
 func BuildParamOverrideContext(info *RelayInfo) map[string]interface{} {
-	if info == nil || info.ChannelMeta == nil {
+	if info == nil {
 		return nil
 	}
 
 	ctx := make(map[string]interface{})
-	if info.UpstreamModelName != "" {
-		ctx["model"] = info.UpstreamModelName
-		ctx["upstream_model"] = info.UpstreamModelName
+	if info.ChannelMeta != nil && info.ChannelMeta.UpstreamModelName != "" {
+		ctx["model"] = info.ChannelMeta.UpstreamModelName
+		ctx["upstream_model"] = info.ChannelMeta.UpstreamModelName
 	}
 	if info.OriginModelName != "" {
 		ctx["original_model"] = info.OriginModelName
@@ -590,8 +659,13 @@ func BuildParamOverrideContext(info *RelayInfo) map[string]interface{} {
 		}
 	}
 
-	if len(ctx) == 0 {
-		return nil
+	if info.RequestURLPath != "" {
+		requestPath := info.RequestURLPath
+		if requestPath != "" {
+			ctx["request_path"] = requestPath
+		}
 	}
+
+	ctx["is_channel_test"] = info.IsChannelTest
 	return ctx
 }

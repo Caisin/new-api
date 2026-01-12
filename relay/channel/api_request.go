@@ -71,17 +71,15 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
 	headers := req.Header
-	headerOverride, err := processHeaderOverride(info)
-	if err != nil {
-		return nil, err
-	}
-	for key, value := range headerOverride {
-		headers.Set(key, value)
-	}
 	err = a.SetupRequestHeader(c, &headers, info)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
+	}            
+	headerOverride, err := buildHeaderOverrideSpec(info)
+	if err != nil {
+		return nil, err
 	}
+	applyHeaderOverride(headers, headerOverride)
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
@@ -104,17 +102,15 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	// set form data
 	req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 	headers := req.Header
-	headerOverride, err := processHeaderOverride(info)
-	if err != nil {
-		return nil, err
-	}
-	for key, value := range headerOverride {
-		headers.Set(key, value)
-	}
 	err = a.SetupRequestHeader(c, &headers, info)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	headerOverride, err := buildHeaderOverrideSpec(info)
+	if err != nil {
+		return nil, err
+	}
+	applyHeaderOverride(headers, headerOverride)
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
@@ -128,18 +124,16 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	targetHeader := http.Header{}
-	headerOverride, err := processHeaderOverride(info)
-	if err != nil {
-		return nil, err
-	}
-	for key, value := range headerOverride {
-		targetHeader.Set(key, value)
-	}
 	err = a.SetupRequestHeader(c, &targetHeader, info)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
+	headerOverride, err := buildHeaderOverrideSpec(info)
+	if err != nil {
+		return nil, err
+	}
+	applyHeaderOverride(targetHeader, headerOverride)
 	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
 	if err != nil {
 		return nil, fmt.Errorf("dial failed to %s: %w", fullRequestURL, err)

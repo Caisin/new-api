@@ -193,6 +193,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 		}
 	}
 
+	info.IsChannelTest = true
 	info.InitChannelMeta(c)
 
 	err = helper.ModelMappedHelper(c, info, request)
@@ -309,6 +310,27 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 			newAPIError: types.NewError(err, types.ErrorCodeJsonMarshalFailed),
 		}
 	}
+
+	//jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings)
+	//if err != nil {
+	//	return testResult{
+	//		context:     c,
+	//		localErr:    err,
+	//		newAPIError: types.NewError(err, types.ErrorCodeConvertRequestFailed),
+	//	}
+	//}
+
+	if len(info.ParamOverride) > 0 {
+		jsonData, err = relaycommon.ApplyParamOverride(jsonData, info.ParamOverride, relaycommon.BuildParamOverrideContext(info))
+		if err != nil {
+			return testResult{
+				context:     c,
+				localErr:    err,
+				newAPIError: types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid),
+			}
+		}
+	}
+
 	requestBody := bytes.NewBuffer(jsonData)
 	c.Request.Body = io.NopCloser(requestBody)
 	resp, err := adaptor.DoRequest(c, info, requestBody)
@@ -322,6 +344,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	var httpResp *http.Response
 	if resp != nil {
 		httpResp = resp.(*http.Response)
+		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
 		if httpResp.StatusCode != http.StatusOK {
 			err := service.RelayErrorHandler(c.Request.Context(), httpResp, true)
 			common.SysError(fmt.Sprintf(
