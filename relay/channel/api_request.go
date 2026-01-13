@@ -25,11 +25,12 @@ import (
 )
 
 func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Header) {
-	if info.RelayMode == constant.RelayModeAudioTranscription || info.RelayMode == constant.RelayModeAudioTranslation {
+	switch info.RelayMode {
+	case constant.RelayModeAudioTranscription, constant.RelayModeAudioTranslation:
 		// multipart/form-data
-	} else if info.RelayMode == constant.RelayModeRealtime {
+	case constant.RelayModeRealtime:
 		// websocket
-	} else {
+	default:
 		req.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 		req.Set("Accept", c.Request.Header.Get("Accept"))
 		if info.IsStream && c.Request.Header.Get("Accept") == "" {
@@ -74,7 +75,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	err = a.SetupRequestHeader(c, &headers, info)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
-	}            
+	}
 	headerOverride, err := buildHeaderOverrideSpec(info)
 	if err != nil {
 		return nil, err
@@ -123,7 +124,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
-	targetHeader := http.Header{}
+	targetHeader := c.Request.Header
 	err = a.SetupRequestHeader(c, &targetHeader, info)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)

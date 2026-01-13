@@ -574,13 +574,12 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
-	if info.RelayMode == relayconstant.RelayModeAudioTranscription ||
-		info.RelayMode == relayconstant.RelayModeAudioTranslation ||
-		info.RelayMode == relayconstant.RelayModeImagesEdits {
+	switch info.RelayMode {
+	case relayconstant.RelayModeAudioTranscription, relayconstant.RelayModeAudioTranslation, relayconstant.RelayModeImagesEdits:
 		return channel.DoFormRequest(a, c, info, requestBody)
-	} else if info.RelayMode == relayconstant.RelayModeRealtime {
+	case relayconstant.RelayModeRealtime:
 		return channel.DoWssRequest(a, c, info, requestBody)
-	} else {
+	default:
 		return channel.DoApiRequest(a, c, info, requestBody)
 	}
 }
