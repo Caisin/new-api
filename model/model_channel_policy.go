@@ -13,3 +13,15 @@ type ModelChannelPolicy struct {
 func (ModelChannelPolicy) TableName() string {
 	return "model_channel_policies"
 }
+
+func GetModelChannelPoliciesByModel(modelName string) ([]ModelChannelPolicy, error) {
+	policies := make([]ModelChannelPolicy, 0)
+	if modelName == "" {
+		return policies, nil
+	}
+	err := DB.Where("model = ?", modelName).
+		Order("priority DESC").
+		Order("channel_id ASC").
+		Find(&policies).Error
+	return policies, err
+}

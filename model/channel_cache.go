@@ -16,6 +16,8 @@ import (
 
 var group2model2channels map[string]map[string][]int // enabled channel
 var channelsIDM map[int]*Channel                     // all channels include disabled
+var model2channelPolicies map[string][]ModelChannelPolicy
+var model2channelStateMap map[string]map[int]*ModelChannelState
 var channelSyncLock sync.RWMutex
 
 func InitChannelCache() {
@@ -64,8 +66,28 @@ func InitChannelCache() {
 		}
 	}
 
+	var policies []ModelChannelPolicy
+	DB.Order("priority DESC").Order("channel_id ASC").Find(&policies)
+	newModel2channelPolicies := make(map[string][]ModelChannelPolicy)
+	for _, policy := range policies {
+		newModel2channelPolicies[policy.Model] = append(newModel2channelPolicies[policy.Model], policy)
+	}
+
+	var states []ModelChannelState
+	DB.Find(&states)
+	newModel2channelStateMap := make(map[string]map[int]*ModelChannelState)
+	for i := range states {
+		state := states[i]
+		if _, ok := newModel2channelStateMap[state.Model]; !ok {
+			newModel2channelStateMap[state.Model] = make(map[int]*ModelChannelState)
+		}
+		newModel2channelStateMap[state.Model][state.ChannelId] = &state
+	}
+
 	channelSyncLock.Lock()
 	group2model2channels = newGroup2model2channels
+	model2channelPolicies = newModel2channelPolicies
+	model2channelStateMap = newModel2channelStateMap
 	//channelsIDM = newChannelId2channel
 	for i, channel := range newChannelId2channel {
 		if channel.ChannelInfo.IsMultiKey {
@@ -262,4 +284,62 @@ func CacheUpdateChannel(channel *Channel) {
 	println("before:", channelsIDM[channel.Id].ChannelInfo.MultiKeyPollingIndex)
 	channelsIDM[channel.Id] = channel
 	println("after :", channelsIDM[channel.Id].ChannelInfo.MultiKeyPollingIndex)
+}
+
+func CacheGetModelChannelPoliciesByModel(modelName string) ([]ModelChannelPolicy, error) {
+	if !common.MemoryCacheEnabled {
+		return GetModelChannelPoliciesByModel(modelName)
+	}
+	policies := make([]ModelChannelPolicy, 0)
+	if modelName == "" {
+		return policies, nil
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	if model2channelPolicies == nil {
+		return policies, nil
+	}
+
+	cachedPolicies, ok := model2channelPolicies[modelName]
+	if !ok || len(cachedPolicies) == 0 {
+		return policies, nil
+	}
+
+	policies = make([]ModelChannelPolicy, len(cachedPolicies))
+	copy(policies, cachedPolicies)
+	return policies, nil
+}
+
+func CacheGetModelChannelStateMapByModel(modelName string) (map[int]*ModelChannelState, error) {
+	if !common.MemoryCacheEnabled {
+		return GetModelChannelStateMapByModel(modelName)
+	}
+	stateMap := make(map[int]*ModelChannelState)
+	if modelName == "" {
+		return stateMap, nil
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	if model2channelStateMap == nil {
+		return stateMap, nil
+	}
+
+	cachedStateMap, ok := model2channelStateMap[modelName]
+	if !ok || len(cachedStateMap) == 0 {
+		return stateMap, nil
+	}
+
+	stateMap = make(map[int]*ModelChannelState, len(cachedStateMap))
+	for channelID, state := range cachedStateMap {
+		if state == nil {
+			continue
+		}
+		stateCopy := *state
+		stateMap[channelID] = &stateCopy
+	}
+	return stateMap, nil
 }

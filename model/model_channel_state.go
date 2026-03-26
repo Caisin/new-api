@@ -36,3 +36,21 @@ func IsValidModelChannelStateStatus(status string) bool {
 func (s *ModelChannelState) IsDisabled() bool {
 	return s.Status == ModelChannelStateStatusAutoDisabled || s.Status == ModelChannelStateStatusManualDisabled
 }
+
+func GetModelChannelStateMapByModel(modelName string) (map[int]*ModelChannelState, error) {
+	stateMap := make(map[int]*ModelChannelState)
+	if modelName == "" {
+		return stateMap, nil
+	}
+
+	var states []ModelChannelState
+	err := DB.Where("model = ?", modelName).Find(&states).Error
+	if err != nil {
+		return nil, err
+	}
+	for i := range states {
+		state := states[i]
+		stateMap[state.ChannelId] = &state
+	}
+	return stateMap, nil
+}
