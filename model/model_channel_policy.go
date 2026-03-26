@@ -113,31 +113,27 @@ func ReplaceModelChannelPolicies(modelName string, policies []ModelChannelPolicy
 		return nil
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("model = ?", modelName).Delete(&ModelChannelPolicy{}).Error; err != nil {
+		return replaceModelChannelPoliciesTx(tx, modelName, policies)
+	})
+}
+
+func ReplaceModelChannelPoliciesAndCleanupStates(modelName string, policies []ModelChannelPolicy) error {
+	if modelName == "" {
+		return nil
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := replaceModelChannelPoliciesTx(tx, modelName, policies); err != nil {
 			return err
 		}
-		now := common.GetTimestamp()
-		for i := range policies {
-			policy := policies[i]
-			policy.Model = modelName
-			policy.Id = 0
-			policy.CreatedAt = now
-			policy.UpdatedAt = now
-			originalPriority := policy.Priority
-			originalManualEnabled := policy.ManualEnabled
-			if err := tx.Omit("id").Create(&policy).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&ModelChannelPolicy{}).Where("id = ?", policy.Id).Updates(map[string]interface{}{
-				"priority":       originalPriority,
-				"manual_enabled": originalManualEnabled,
-				"created_at":     policy.CreatedAt,
-				"updated_at":     policy.UpdatedAt,
-			}).Error; err != nil {
-				return err
-			}
+		channelIDs := make([]int, 0, len(policies))
+		for _, policy := range policies {
+			channelIDs = append(channelIDs, policy.ChannelId)
 		}
-		return nil
+		query := tx.Where("model = ?", modelName)
+		if len(channelIDs) > 0 {
+			query = query.Where("channel_id NOT IN ?", channelIDs)
+		}
+		return query.Delete(&ModelChannelState{}).Error
 	})
 }
 
@@ -148,4 +144,32 @@ func ListModelChannelPolicyModels() ([]string, error) {
 	}
 	sort.Strings(models)
 	return models, nil
+}
+
+func replaceModelChannelPoliciesTx(tx *gorm.DB, modelName string, policies []ModelChannelPolicy) error {
+	if err := tx.Where("model = ?", modelName).Delete(&ModelChannelPolicy{}).Error; err != nil {
+		return err
+	}
+	now := common.GetTimestamp()
+	for i := range policies {
+		policy := policies[i]
+		policy.Model = modelName
+		policy.Id = 0
+		policy.CreatedAt = now
+		policy.UpdatedAt = now
+		originalPriority := policy.Priority
+		originalManualEnabled := policy.ManualEnabled
+		if err := tx.Omit("id").Create(&policy).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&ModelChannelPolicy{}).Where("id = ?", policy.Id).Updates(map[string]interface{}{
+			"priority":       originalPriority,
+			"manual_enabled": originalManualEnabled,
+			"created_at":     policy.CreatedAt,
+			"updated_at":     policy.UpdatedAt,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

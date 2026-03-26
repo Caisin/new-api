@@ -484,10 +484,16 @@ func TestGetModelChannelCircuitModelsCountsPolicyManualDisable(t *testing.T) {
 		ChannelId: 92,
 		Status:    model.ModelChannelStateStatusManualDisabled,
 	}))
+	require.NoError(t, model.UpsertModelChannelState(&model.ModelChannelState{
+		Model:     "gpt-summary",
+		ChannelId: 999,
+		Status:    model.ModelChannelStateStatusAutoDisabled,
+	}))
 
 	items, err := GetModelChannelCircuitModels()
 	require.NoError(t, err)
 	require.Len(t, items, 1)
+	require.Equal(t, 0, items[0].AutoDisabledCount)
 	require.Equal(t, 2, items[0].ManualDisabled)
 }
 
@@ -499,12 +505,42 @@ func TestEnableModelChannelCircuitPairRejectsUnknownPolicy(t *testing.T) {
 	require.Contains(t, err.Error(), "policy")
 }
 
+func TestEnableModelChannelCircuitPairRejectsMissingChannel(t *testing.T) {
+	setupModelChannelCircuitTestDB(t)
+
+	require.NoError(t, (&model.ModelChannelPolicy{
+		Model:         "gpt-missing-channel",
+		ChannelId:     1001,
+		Priority:      100,
+		ManualEnabled: true,
+	}).Insert())
+
+	err := EnableModelChannelCircuitPair("gpt-missing-channel", 1001)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "channel")
+}
+
 func TestProbeModelChannelCircuitPairRejectsUnknownPolicy(t *testing.T) {
 	setupModelChannelCircuitTestDB(t)
 
 	result := ProbeModelChannelCircuitPair("gpt-unknown", 999)
 	require.False(t, result.Success)
 	require.Contains(t, result.Message, "policy")
+}
+
+func TestProbeModelChannelCircuitPairRejectsMissingChannel(t *testing.T) {
+	setupModelChannelCircuitTestDB(t)
+
+	require.NoError(t, (&model.ModelChannelPolicy{
+		Model:         "gpt-missing-channel",
+		ChannelId:     1002,
+		Priority:      100,
+		ManualEnabled: true,
+	}).Insert())
+
+	result := ProbeModelChannelCircuitPair("gpt-missing-channel", 1002)
+	require.False(t, result.Success)
+	require.Contains(t, result.Message, "channel")
 }
 
 func TestSetupModelChannelCircuitTestDBRestoresChannelCacheGlobals(t *testing.T) {

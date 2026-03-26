@@ -349,13 +349,18 @@ func GetModelChannelCircuitModels() ([]dto.ModelChannelCircuitModelSummary, erro
 			Model:       modelName,
 			PolicyCount: len(policies),
 		}
+		policyChannelIDs := make(map[int]struct{}, len(policies))
 		manualDisabledChannels := make(map[int]struct{})
 		for _, policy := range policies {
+			policyChannelIDs[policy.ChannelId] = struct{}{}
 			if !policy.ManualEnabled {
 				manualDisabledChannels[policy.ChannelId] = struct{}{}
 			}
 		}
 		for _, state := range stateMap {
+			if _, ok := policyChannelIDs[state.ChannelId]; !ok {
+				continue
+			}
 			switch state.Status {
 			case model.ModelChannelStateStatusAutoDisabled:
 				summary.AutoDisabledCount++
@@ -433,14 +438,7 @@ func SaveModelChannelPolicies(modelName string, items []dto.ModelChannelPolicyIt
 	if len(policies) == 0 {
 		return fmt.Errorf("channels 不能为空")
 	}
-	channelIDs := make([]int, 0, len(policies))
-	for _, policy := range policies {
-		channelIDs = append(channelIDs, policy.ChannelId)
-	}
-	if err := model.ReplaceModelChannelPolicies(modelName, policies); err != nil {
-		return err
-	}
-	if err := model.DeleteModelChannelStatesNotIn(modelName, channelIDs); err != nil {
+	if err := model.ReplaceModelChannelPoliciesAndCleanupStates(modelName, policies); err != nil {
 		return err
 	}
 	model.InitChannelCache()
@@ -448,7 +446,7 @@ func SaveModelChannelPolicies(modelName string, items []dto.ModelChannelPolicyIt
 }
 
 func EnableModelChannelCircuitPair(modelName string, channelID int) error {
-	if _, err := getRequiredModelChannelPolicy(modelName, channelID); err != nil {
+	if _, _, err := getRequiredModelChannelPolicyAndChannel(modelName, channelID); err != nil {
 		return err
 	}
 	return model.MutateModelChannelState(modelName, channelID, func(state *model.ModelChannelState) error {
@@ -463,7 +461,7 @@ func EnableModelChannelCircuitPair(modelName string, channelID int) error {
 }
 
 func DisableModelChannelCircuitPair(modelName string, channelID int) error {
-	if _, err := getRequiredModelChannelPolicy(modelName, channelID); err != nil {
+	if _, _, err := getRequiredModelChannelPolicyAndChannel(modelName, channelID); err != nil {
 		return err
 	}
 	return model.MutateModelChannelState(modelName, channelID, func(state *model.ModelChannelState) error {
@@ -480,20 +478,27 @@ func ProbeModelChannelCircuitPair(modelName string, channelID int) ModelChannelP
 		Model:     modelName,
 		ChannelId: channelID,
 	}
-	if _, err := getRequiredModelChannelPolicy(modelName, channelID); err != nil {
+	if _, _, err := getRequiredModelChannelPolicyAndChannel(modelName, channelID); err != nil {
 		result.Message = err.Error()
 		return result
 	}
 	return ProbeModelChannelPair(context.Background(), modelName, channelID)
 }
 
-func getRequiredModelChannelPolicy(modelName string, channelID int) (*model.ModelChannelPolicy, error) {
+func getRequiredModelChannelPolicyAndChannel(modelName string, channelID int) (*model.ModelChannelPolicy, *model.Channel, error) {
 	policy, err := model.GetModelChannelPolicy(modelName, channelID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if policy == nil {
-		return nil, fmt.Errorf("model-channel policy not found")
+		return nil, nil, fmt.Errorf("model-channel policy not found")
 	}
-	return policy, nil
+	channel, err := model.GetChannelById(channelID, true)
+	if err != nil {
+		if model.IsChannelNotFoundError(err) {
+			return nil, nil, fmt.Errorf("model-channel pair channel not found")
+		}
+		return nil, nil, err
+	}
+	return policy, channel, nil
 }
