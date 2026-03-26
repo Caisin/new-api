@@ -130,6 +130,19 @@ func TestBuildOrderedModelChannelCandidatesFallsBackWhenModelHasNoPolicyRows(t *
 	result, err := BuildOrderedModelChannelCandidates(nil, "default", "gpt-no-policy")
 	require.NoError(t, err)
 	require.True(t, result.UseLegacySelection)
+	require.Equal(t, "gpt-no-policy", result.PolicyLookupModel)
+	require.Equal(t, 0, result.PolicyRowCount)
+	require.Empty(t, result.Candidates)
+}
+
+func TestBuildOrderedModelChannelCandidatesKeepsRequestedLookupModelWhenFallingBackWithoutPolicies(t *testing.T) {
+	setupModelChannelCircuitTestDB(t)
+
+	result, err := BuildOrderedModelChannelCandidates(nil, "default", "gpt-4o-gizmo-special")
+	require.NoError(t, err)
+	require.True(t, result.UseLegacySelection)
+	require.Equal(t, "gpt-4o-gizmo-special", result.Model)
+	require.Equal(t, "gpt-4o-gizmo-special", result.PolicyLookupModel)
 	require.Equal(t, 0, result.PolicyRowCount)
 	require.Empty(t, result.Candidates)
 }
@@ -164,6 +177,8 @@ func TestBuildOrderedModelChannelCandidatesUsesNormalizedPolicyAndStateModelKey(
 	result, err := BuildOrderedModelChannelCandidates(nil, "default", "gpt-4o-gizmo-special")
 	require.NoError(t, err)
 	require.False(t, result.UseLegacySelection)
+	require.Equal(t, "gpt-4o-gizmo-special", result.Model)
+	require.Equal(t, "gpt-4o-gizmo-*", result.PolicyLookupModel)
 	require.Equal(t, 2, result.PolicyRowCount)
 	require.Len(t, result.Candidates, 1)
 	require.Equal(t, 41, result.Candidates[0].ChannelID)

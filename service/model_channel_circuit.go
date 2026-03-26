@@ -19,6 +19,7 @@ type CandidateChannel struct {
 type OrderedModelChannelCandidates struct {
 	Group              string
 	Model              string
+	PolicyLookupModel  string
 	Candidates         []CandidateChannel
 	PolicyRowCount     int
 	UseLegacySelection bool
@@ -28,9 +29,10 @@ func BuildOrderedModelChannelCandidates(ctx *gin.Context, group string, modelNam
 	_ = ctx
 
 	result := &OrderedModelChannelCandidates{
-		Group:      group,
-		Model:      modelName,
-		Candidates: make([]CandidateChannel, 0),
+		Group:             group,
+		Model:             modelName,
+		PolicyLookupModel: modelName,
+		Candidates:        make([]CandidateChannel, 0),
 	}
 	if group == "" || modelName == "" {
 		return result, nil
@@ -45,6 +47,7 @@ func BuildOrderedModelChannelCandidates(ctx *gin.Context, group string, modelNam
 		result.UseLegacySelection = true
 		return result, nil
 	}
+	result.PolicyLookupModel = effectiveModelKey
 
 	stateMap, err := model.CacheGetModelChannelStateMapByModel(effectiveModelKey)
 	if err != nil {

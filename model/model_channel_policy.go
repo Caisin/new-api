@@ -1,5 +1,10 @@
 package model
 
+import (
+	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
+)
+
 type ModelChannelPolicy struct {
 	Id            int64  `json:"id" gorm:"primaryKey"`
 	Model         string `json:"model" gorm:"type:varchar(255);not null;uniqueIndex:idx_model_channel_policy_model_channel,priority:1"`
@@ -15,30 +20,50 @@ func (ModelChannelPolicy) TableName() string {
 }
 
 func (policy *ModelChannelPolicy) Insert() error {
-	values := map[string]interface{}{
-		"model":          policy.Model,
-		"channel_id":     policy.ChannelId,
-		"priority":       policy.Priority,
-		"manual_enabled": policy.ManualEnabled,
-		"created_at":     policy.CreatedAt,
-		"updated_at":     policy.UpdatedAt,
+	originalID := policy.Id
+	originalCreatedAt := policy.CreatedAt
+	originalUpdatedAt := policy.UpdatedAt
+	now := common.GetTimestamp()
+	policy.CreatedAt = now
+	policy.UpdatedAt = now
+
+	originalPriority := policy.Priority
+	originalManualEnabled := policy.ManualEnabled
+
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Omit("id").Create(policy).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&ModelChannelPolicy{}).Where("id = ?", policy.Id).Updates(map[string]interface{}{
+			"priority":       originalPriority,
+			"manual_enabled": originalManualEnabled,
+			"created_at":     policy.CreatedAt,
+			"updated_at":     policy.UpdatedAt,
+		}).Error
+	}); err != nil {
+		policy.Id = originalID
+		policy.CreatedAt = originalCreatedAt
+		policy.UpdatedAt = originalUpdatedAt
+		policy.Priority = originalPriority
+		policy.ManualEnabled = originalManualEnabled
+		return err
 	}
-	return DB.Model(&ModelChannelPolicy{}).Create(values).Error
+
+	policy.Priority = originalPriority
+	policy.ManualEnabled = originalManualEnabled
+	return nil
 }
 
 func (policy *ModelChannelPolicy) Update() error {
-	updates := map[string]interface{}{
-		"priority":       policy.Priority,
-		"manual_enabled": policy.ManualEnabled,
-		"updated_at":     policy.UpdatedAt,
-	}
+	policy.UpdatedAt = common.GetTimestamp()
 	query := DB.Model(&ModelChannelPolicy{})
 	if policy.Id > 0 {
 		query = query.Where("id = ?", policy.Id)
 	} else {
 		query = query.Where("model = ? AND channel_id = ?", policy.Model, policy.ChannelId)
 	}
-	return query.Updates(updates).Error
+	return query.Select("priority", "manual_enabled", "updated_at").Updates(policy).Error
 }
 
 func GetModelChannelPoliciesByModel(modelName string) ([]ModelChannelPolicy, error) {

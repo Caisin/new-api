@@ -160,11 +160,79 @@ func TestModelChannelPolicyInsertPersistsManualEnabledFalse(t *testing.T) {
 		ManualEnabled: false,
 	}
 	require.NoError(t, policy.Insert())
+	require.Positive(t, policy.Id)
+	require.Positive(t, policy.CreatedAt)
+	require.Positive(t, policy.UpdatedAt)
+	require.Equal(t, int64(7), policy.Priority)
+	require.False(t, policy.ManualEnabled)
 
 	policies, err := GetModelChannelPoliciesByModel("gpt-4.1")
 	require.NoError(t, err)
 	require.Len(t, policies, 1)
 	require.False(t, policies[0].ManualEnabled)
+	require.Equal(t, policy.Id, policies[0].Id)
+	require.Equal(t, policy.CreatedAt, policies[0].CreatedAt)
+	require.Equal(t, policy.UpdatedAt, policies[0].UpdatedAt)
+}
+
+func TestModelChannelPolicyInsertIgnoresPresetID(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&ModelChannelPolicy{}))
+
+	oldDB := DB
+	DB = db
+	t.Cleanup(func() {
+		DB = oldDB
+	})
+
+	policy := &ModelChannelPolicy{
+		Id:            999,
+		Model:         "gpt-4.1",
+		ChannelId:     106,
+		Priority:      8,
+		ManualEnabled: false,
+	}
+	require.NoError(t, policy.Insert())
+	require.NotEqual(t, int64(999), policy.Id)
+
+	var saved ModelChannelPolicy
+	require.NoError(t, db.First(&saved, "model = ? AND channel_id = ?", "gpt-4.1", 106).Error)
+	require.Equal(t, policy.Id, saved.Id)
+	require.NotEqual(t, int64(999), saved.Id)
+	require.False(t, saved.ManualEnabled)
+}
+
+func TestModelChannelPolicyInsertRestoresReceiverOnError(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&ModelChannelPolicy{}))
+
+	oldDB := DB
+	DB = db
+	t.Cleanup(func() {
+		DB = oldDB
+	})
+
+	require.NoError(t, (&ModelChannelPolicy{
+		Model:         "gpt-4.1",
+		ChannelId:     107,
+		Priority:      1,
+		ManualEnabled: true,
+	}).Insert())
+
+	policy := &ModelChannelPolicy{
+		Model:         "gpt-4.1",
+		ChannelId:     107,
+		Priority:      9,
+		ManualEnabled: false,
+	}
+	require.Error(t, policy.Insert())
+	require.Zero(t, policy.Id)
+	require.Zero(t, policy.CreatedAt)
+	require.Zero(t, policy.UpdatedAt)
+	require.Equal(t, int64(9), policy.Priority)
+	require.False(t, policy.ManualEnabled)
 }
 
 func TestModelChannelPolicyUpdatePersistsManualEnabledFalse(t *testing.T) {
@@ -187,12 +255,50 @@ func TestModelChannelPolicyUpdatePersistsManualEnabledFalse(t *testing.T) {
 	require.NoError(t, db.Create(policy).Error)
 
 	policy.ManualEnabled = false
+	policy.Priority = 10
 	require.NoError(t, policy.Update())
+	require.Positive(t, policy.UpdatedAt)
 
 	policies, err := GetModelChannelPoliciesByModel("gpt-4.1")
 	require.NoError(t, err)
 	require.Len(t, policies, 1)
 	require.False(t, policies[0].ManualEnabled)
+	require.Equal(t, int64(10), policies[0].Priority)
+	require.Equal(t, policy.UpdatedAt, policies[0].UpdatedAt)
+}
+
+func TestModelChannelPolicyUpdatePersistsManualEnabledFalseWithoutID(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&ModelChannelPolicy{}))
+
+	oldDB := DB
+	DB = db
+	t.Cleanup(func() {
+		DB = oldDB
+	})
+
+	require.NoError(t, db.Create(&ModelChannelPolicy{
+		Model:         "gpt-4.1",
+		ChannelId:     108,
+		Priority:      11,
+		ManualEnabled: true,
+	}).Error)
+
+	policy := &ModelChannelPolicy{
+		Model:         "gpt-4.1",
+		ChannelId:     108,
+		Priority:      12,
+		ManualEnabled: false,
+	}
+	require.NoError(t, policy.Update())
+	require.Positive(t, policy.UpdatedAt)
+
+	var saved ModelChannelPolicy
+	require.NoError(t, db.First(&saved, "model = ? AND channel_id = ?", "gpt-4.1", 108).Error)
+	require.Equal(t, int64(12), saved.Priority)
+	require.False(t, saved.ManualEnabled)
+	require.Equal(t, policy.UpdatedAt, saved.UpdatedAt)
 }
 
 func TestCacheGetModelChannelPoliciesByModelRefreshesViaInitChannelCache(t *testing.T) {
