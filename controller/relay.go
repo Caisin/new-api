@@ -183,10 +183,24 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		ModelName:  relayInfo.OriginModelName,
 		Retry:      common.GetPointer(0),
 	}
+	if shouldUseOrderedModelChannelRouting(c, relayInfo) {
+		orderedCandidates, orderedErr := service.BuildOrderedModelChannelCandidates(c, relayInfo.TokenGroup, relayInfo.OriginModelName)
+		if orderedErr != nil {
+			newAPIError = types.NewError(fmt.Errorf("获取模型 %s 的有序渠道失败: %s", relayInfo.OriginModelName, orderedErr.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+			return
+		}
+		retryParam.OrderedCandidates = orderedCandidates
+		service.SetSkippedModelChannels(c, orderedCandidates.SkippedChannels)
+		if retryParam.UsesOrderedModelChannelCandidates() && len(orderedCandidates.Candidates) == 0 {
+			newAPIError = types.NewError(fmt.Errorf("分组 %s 下模型 %s 没有可用的有序渠道", relayInfo.TokenGroup, relayInfo.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+			return
+		}
+	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	maxRetry := retryParam.MaxRetry(common.RetryTimes)
+	for ; retryParam.GetRetry() <= maxRetry; retryParam.IncreaseRetry() {
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
@@ -196,17 +210,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		addUsedChannel(c, channel.Id)
-		bodyStorage, bodyErr := common.GetBodyStorage(c)
-		if bodyErr != nil {
-			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
-			if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
-				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
-			} else {
-				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-			}
+		if newAPIError = prepareRelayAttempt(c, channel.Id); newAPIError != nil {
 			break
 		}
-		c.Request.Body = io.NopCloser(bodyStorage)
 
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
@@ -221,22 +227,28 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
+			if retryParam.UsesOrderedModelChannelCandidates() {
+				_ = service.ResetModelChannelFailure(retryParam.OrderedCandidates.PolicyLookupModel, channel.Id)
+			}
 			return
 		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
+		if retryParam.UsesOrderedModelChannelCandidates() {
+			_ = service.RecordModelChannelFailure(retryParam.OrderedCandidates.PolicyLookupModel, channel.Id, newAPIError)
+		}
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
+		if !shouldRetryRelayAttempt(c, retryParam, newAPIError, maxRetry-retryParam.GetRetry()) {
 			break
 		}
 	}
 
-	useChannel := c.GetStringSlice("use_channel")
-	if len(useChannel) > 1 {
-		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
+	retryPathIDs, retryPathText := service.GetRetryPath(c)
+	if len(retryPathIDs) > 1 {
+		retryLogStr := fmt.Sprintf("重试：%s", retryPathText)
 		logger.LogInfo(c, retryLogStr)
 	}
 }
@@ -284,7 +296,15 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
-	if info.ChannelMeta == nil {
+	var channel *model.Channel
+	if retryParam.UsesOrderedModelChannelCandidates() {
+		orderedCandidate := retryParam.GetOrderedCandidate()
+		if orderedCandidate == nil {
+			return nil, types.NewError(fmt.Errorf("模型 %s 的有序渠道索引 %d 超出范围", info.OriginModelName, retryParam.GetRetry()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		channel = orderedCandidate.Channel
+	}
+	if channel == nil && info.ChannelMeta == nil {
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
 		if !autoBan {
@@ -297,7 +317,13 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}, nil
 	}
-	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
+	var (
+		selectGroup = retryParam.TokenGroup
+		err         error
+	)
+	if channel == nil {
+		channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(retryParam)
+	}
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
@@ -345,6 +371,63 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return false
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
+func shouldUseOrderedModelChannelRouting(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
+	if relayInfo == nil || relayInfo.TokenGroup == "auto" {
+		return false
+	}
+	if _, hasSpecificChannel := c.Get("specific_channel_id"); hasSpecificChannel {
+		return false
+	}
+	if relayInfo.TaskRelayInfo != nil {
+		if lockedChannel, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedChannel != nil {
+			return false
+		}
+	}
+	if relayInfo.OriginModelName == "" {
+		return false
+	}
+	return true
+}
+
+func shouldRetryRelayAttempt(c *gin.Context, retryParam *service.RetryParam, openaiErr *types.NewAPIError, retryTimes int) bool {
+	if openaiErr == nil {
+		return false
+	}
+	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+		return false
+	}
+	if types.IsChannelError(openaiErr) {
+		return true
+	}
+	if types.IsSkipRetryError(openaiErr) {
+		return false
+	}
+	if retryTimes <= 0 {
+		return false
+	}
+	if _, ok := c.Get("specific_channel_id"); ok {
+		return false
+	}
+	if retryParam != nil && retryParam.UsesOrderedModelChannelCandidates() && service.ShouldTrackModelChannelFailure(openaiErr) {
+		return true
+	}
+	return shouldRetry(c, openaiErr, retryTimes)
+}
+
+func prepareRelayAttempt(c *gin.Context, channelID int) *types.NewAPIError {
+	bodyStorage, bodyErr := common.GetBodyStorage(c)
+	if bodyErr != nil {
+		// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
+		if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
+			return types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
+		}
+		return types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	c.Request.Body = io.NopCloser(bodyStorage)
+	service.AppendRetryPath(c, channelID)
+	return nil
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {

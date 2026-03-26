@@ -352,6 +352,24 @@ func CacheGetModelChannelStateMapByModel(modelName string) (map[int]*ModelChanne
 	return stateMap, nil
 }
 
+func CacheUpdateModelChannelState(state *ModelChannelState) {
+	if !common.MemoryCacheEnabled || state == nil {
+		return
+	}
+
+	channelSyncLock.Lock()
+	defer channelSyncLock.Unlock()
+
+	if model2channelStateMap == nil {
+		model2channelStateMap = make(map[string]map[int]*ModelChannelState)
+	}
+	if model2channelStateMap[state.Model] == nil {
+		model2channelStateMap[state.Model] = make(map[int]*ModelChannelState)
+	}
+	stateCopy := *state
+	model2channelStateMap[state.Model][state.ChannelId] = &stateCopy
+}
+
 func SnapshotChannelCacheStateForTest() ChannelCacheStateForTest {
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()

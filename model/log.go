@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -39,6 +41,11 @@ type Log struct {
 	Other            string `json:"other"`
 }
 
+const (
+	modelChannelRetryPathContextKey = "model_channel_retry_path"
+	modelChannelSkippedContextKey   = "model_channel_skipped"
+)
+
 // don't use iota, avoid change log type value
 const (
 	LogTypeUnknown = 0
@@ -59,6 +66,10 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			// Remove admin-only debug fields.
 			delete(otherMap, "admin_info")
 			delete(otherMap, "reject_reason")
+			delete(otherMap, "retry_path")
+			delete(otherMap, "retry_path_text")
+			delete(otherMap, "attempt_count")
+			delete(otherMap, "skipped_model_channels")
 		}
 		logs[i].Other = common.MapToJsonStr(otherMap)
 		logs[i].Id = startIdx + i + 1
@@ -94,6 +105,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, content))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
+	other = appendRetryPathFields(c, other)
 	otherStr := common.MapToJsonStr(other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -155,6 +167,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, params=%s", userId, common.GetJsonString(params)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
+	params.Other = appendRetryPathFields(c, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -197,6 +210,40 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			LogQuotaData(userId, username, params.ModelName, params.Quota, common.GetTimestamp(), params.PromptTokens+params.CompletionTokens)
 		})
 	}
+}
+
+func appendRetryPathFields(c *gin.Context, other map[string]interface{}) map[string]interface{} {
+	if other == nil {
+		other = make(map[string]interface{})
+	}
+	if c == nil {
+		return other
+	}
+	value, exists := c.Get(modelChannelRetryPathContextKey)
+	if !exists {
+		return other
+	}
+	pathIDs, ok := value.([]int)
+	if !ok || len(pathIDs) == 0 {
+		return other
+	}
+	parts := make([]string, 0, len(pathIDs))
+	for _, channelID := range pathIDs {
+		parts = append(parts, strconv.Itoa(channelID))
+	}
+	other["retry_path"] = append([]int(nil), pathIDs...)
+	other["retry_path_text"] = strings.Join(parts, " -> ")
+	other["attempt_count"] = len(pathIDs)
+	if skippedValue, exists := c.Get(modelChannelSkippedContextKey); exists {
+		if skipped, ok := skippedValue.(map[int]string); ok && len(skipped) > 0 {
+			cloned := make(map[int]string, len(skipped))
+			for channelID, reason := range skipped {
+				cloned[channelID] = reason
+			}
+			other["skipped_model_channels"] = cloned
+		}
+	}
+	return other
 }
 
 type RecordTaskBillingLogParams struct {

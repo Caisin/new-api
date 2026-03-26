@@ -12,11 +12,12 @@ import (
 )
 
 type RetryParam struct {
-	Ctx          *gin.Context
-	TokenGroup   string
-	ModelName    string
-	Retry        *int
-	resetNextTry bool
+	Ctx               *gin.Context
+	TokenGroup        string
+	ModelName         string
+	Retry             *int
+	OrderedCandidates *OrderedModelChannelCandidates
+	resetNextTry      bool
 }
 
 func (p *RetryParam) GetRetry() int {
@@ -43,6 +44,32 @@ func (p *RetryParam) IncreaseRetry() {
 
 func (p *RetryParam) ResetRetryNextTry() {
 	p.resetNextTry = true
+}
+
+func (p *RetryParam) UsesOrderedModelChannelCandidates() bool {
+	return p != nil && p.OrderedCandidates != nil && !p.OrderedCandidates.UseLegacySelection
+}
+
+func (p *RetryParam) GetOrderedCandidate() *CandidateChannel {
+	if !p.UsesOrderedModelChannelCandidates() {
+		return nil
+	}
+	retryIndex := p.GetRetry()
+	if retryIndex < 0 || retryIndex >= len(p.OrderedCandidates.Candidates) {
+		return nil
+	}
+	candidate := p.OrderedCandidates.Candidates[retryIndex]
+	return &candidate
+}
+
+func (p *RetryParam) MaxRetry(defaultMax int) int {
+	if !p.UsesOrderedModelChannelCandidates() {
+		return defaultMax
+	}
+	if len(p.OrderedCandidates.Candidates) == 0 {
+		return -1
+	}
+	return len(p.OrderedCandidates.Candidates) - 1
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.

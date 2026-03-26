@@ -1,11 +1,18 @@
 package service
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -14,9 +21,13 @@ import (
 func setupModelChannelCircuitTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.ModelChannelPolicy{}, &model.ModelChannelState{}))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(8)
 
 	oldDB := model.DB
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
@@ -108,6 +119,11 @@ func TestBuildOrderedModelChannelCandidatesUsesPolicyOrderAndFiltersBlockedChann
 	require.False(t, result.UseLegacySelection)
 	require.Equal(t, 7, result.PolicyRowCount)
 	require.Len(t, result.Candidates, 2)
+	require.Equal(t, "policy_manual_disabled", result.SkippedChannels[12])
+	require.Equal(t, model.ModelChannelStateStatusAutoDisabled, result.SkippedChannels[13])
+	require.Equal(t, model.ModelChannelStateStatusManualDisabled, result.SkippedChannels[14])
+	require.Equal(t, "group_model_unavailable", result.SkippedChannels[15])
+	require.Equal(t, "channel_disabled", result.SkippedChannels[16])
 
 	require.Equal(t, 11, result.Candidates[0].ChannelID)
 	require.Equal(t, int64(100), result.Candidates[0].PolicyPriority)
@@ -211,7 +227,136 @@ func TestBuildOrderedModelChannelCandidatesDoesNotFallbackWhenPoliciesExistButNo
 	require.NoError(t, err)
 	require.False(t, result.UseLegacySelection)
 	require.Equal(t, 2, result.PolicyRowCount)
+	require.Equal(t, "policy_manual_disabled", result.SkippedChannels[31])
+	require.Equal(t, "group_model_unavailable", result.SkippedChannels[32])
 	require.Empty(t, result.Candidates)
+}
+
+func TestApplyModelChannelFailureRetriesImmediatelyBeforeThreshold(t *testing.T) {
+	setupModelChannelCircuitTestDB(t)
+
+	state := &model.ModelChannelState{
+		Model:               "gpt-4.1",
+		ChannelId:           11,
+		Status:              model.ModelChannelStateStatusEnabled,
+		ConsecutiveFailures: 1,
+	}
+
+	shouldRetryNext, err := ApplyModelChannelFailure(state, "model_rate_limited", "429", 3, 300)
+	require.NoError(t, err)
+	require.True(t, shouldRetryNext)
+	require.Equal(t, model.ModelChannelStateStatusEnabled, state.Status)
+	require.Equal(t, 2, state.ConsecutiveFailures)
+	require.Positive(t, state.LastFailureAt)
+	require.Zero(t, state.ProbeAfterAt)
+	require.Equal(t, "model_rate_limited", state.DisableReason)
+
+	saved, err := model.GetModelChannelState("gpt-4.1", 11)
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	require.Equal(t, model.ModelChannelStateStatusEnabled, saved.Status)
+	require.Equal(t, 2, saved.ConsecutiveFailures)
+}
+
+func TestApplyModelChannelFailureDisablesAtThresholdAndSchedulesProbe(t *testing.T) {
+	setupModelChannelCircuitTestDB(t)
+
+	state := &model.ModelChannelState{
+		Model:               "gpt-4.1",
+		ChannelId:           12,
+		Status:              model.ModelChannelStateStatusEnabled,
+		ConsecutiveFailures: 2,
+	}
+
+	shouldRetryNext, err := ApplyModelChannelFailure(state, "model_rate_limited", "429", 3, 300)
+	require.NoError(t, err)
+	require.True(t, shouldRetryNext)
+	require.Equal(t, model.ModelChannelStateStatusAutoDisabled, state.Status)
+	require.Equal(t, 3, state.ConsecutiveFailures)
+	require.Positive(t, state.DisabledAt)
+	require.Greater(t, state.ProbeAfterAt, state.LastFailureAt)
+
+	saved, err := model.GetModelChannelState("gpt-4.1", 12)
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	require.Equal(t, model.ModelChannelStateStatusAutoDisabled, saved.Status)
+	require.Equal(t, 3, saved.ConsecutiveFailures)
+}
+
+func TestRecordRetryPathAppendsActualAttemptedChannels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	AppendRetryPath(ctx, 11)
+	AppendRetryPath(ctx, 18)
+	AppendRetryPath(ctx, 24)
+
+	pathIDs, pathText := GetRetryPath(ctx)
+	require.Equal(t, []int{11, 18, 24}, pathIDs)
+	require.Equal(t, "11 -> 18 -> 24", pathText)
+}
+
+func TestShouldTrackModelChannelFailureTreatsUnsupportedModelAsModelScoped(t *testing.T) {
+	apiErr := types.NewOpenAIError(errors.New("model gpt-4.1 is not supported by this provider"), types.ErrorCodeInvalidRequest, http.StatusBadRequest)
+
+	require.True(t, ShouldTrackModelChannelFailure(apiErr))
+	reasonType, reason := classifyModelChannelFailure(apiErr)
+	require.Equal(t, "model_not_supported", reasonType)
+	require.Contains(t, reason, "not supported")
+}
+
+func TestRecordModelChannelFailureCountsConcurrentFailures(t *testing.T) {
+	setupModelChannelCircuitTestDB(t)
+
+	apiErr := types.NewOpenAIError(errors.New("rate limited"), types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests)
+	var wg sync.WaitGroup
+	errCh := make(chan error, 5)
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- RecordModelChannelFailure("gpt-4.1", 19, apiErr)
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+
+	saved, err := model.GetModelChannelState("gpt-4.1", 19)
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	require.Equal(t, 5, saved.ConsecutiveFailures)
+	require.Equal(t, model.ModelChannelStateStatusAutoDisabled, saved.Status)
+}
+
+func TestResetModelChannelFailurePreservesManualDisabled(t *testing.T) {
+	setupModelChannelCircuitTestDB(t)
+
+	require.NoError(t, model.UpsertModelChannelState(&model.ModelChannelState{
+		Model:               "gpt-4.1",
+		ChannelId:           20,
+		Status:              model.ModelChannelStateStatusManualDisabled,
+		ConsecutiveFailures: 4,
+		LastFailureAt:       123,
+		ProbeAfterAt:        456,
+		DisabledAt:          789,
+		DisableReason:       "manual",
+	}))
+
+	require.NoError(t, ResetModelChannelFailure("gpt-4.1", 20))
+
+	saved, err := model.GetModelChannelState("gpt-4.1", 20)
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	require.Equal(t, model.ModelChannelStateStatusManualDisabled, saved.Status)
+	require.Equal(t, 4, saved.ConsecutiveFailures)
+	require.Equal(t, int64(123), saved.LastFailureAt)
+	require.Equal(t, int64(456), saved.ProbeAfterAt)
+	require.Equal(t, int64(789), saved.DisabledAt)
+	require.Equal(t, "manual", saved.DisableReason)
 }
 
 func TestSetupModelChannelCircuitTestDBRestoresChannelCacheGlobals(t *testing.T) {
