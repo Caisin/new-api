@@ -96,6 +96,17 @@ func GetModelChannelState(modelName string, channelID int) (*ModelChannelState, 
 	return nil, err
 }
 
+func DeleteModelChannelStatesNotIn(modelName string, channelIDs []int) error {
+	if modelName == "" {
+		return nil
+	}
+	query := DB.Where("model = ?", modelName)
+	if len(channelIDs) > 0 {
+		query = query.Where("channel_id NOT IN ?", channelIDs)
+	}
+	return query.Delete(&ModelChannelState{}).Error
+}
+
 func UpsertModelChannelState(state *ModelChannelState) error {
 	if state == nil || state.Model == "" || state.ChannelId == 0 {
 		return nil

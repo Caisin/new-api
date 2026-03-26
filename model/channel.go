@@ -355,6 +355,18 @@ func GetChannelById(id int, selectAll bool) (*Channel, error) {
 	return channel, nil
 }
 
+func IsChannelNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return true
+	}
+	lowerErr := strings.ToLower(err.Error())
+	return strings.Contains(lowerErr, "channel not found") ||
+		strings.Contains(lowerErr, "已不存在")
+}
+
 func BatchInsertChannels(channels []Channel) error {
 	if len(channels) == 0 {
 		return nil

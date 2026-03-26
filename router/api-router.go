@@ -246,6 +246,16 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.POST("/upstream_updates/detect", controller.DetectChannelUpstreamModelUpdates)
 			channelRoute.POST("/upstream_updates/detect_all", controller.DetectAllChannelUpstreamModelUpdates)
 		}
+		modelChannelCircuitRoute := apiRouter.Group("/model_channel_circuit")
+		modelChannelCircuitRoute.Use(middleware.AdminAuth())
+		{
+			modelChannelCircuitRoute.GET("/models", controller.GetModelChannelCircuitModels)
+			modelChannelCircuitRoute.GET("/models/:model", controller.GetModelChannelCircuitDetail)
+			modelChannelCircuitRoute.PUT("/models/:model/policies", controller.UpdateModelChannelPolicies)
+			modelChannelCircuitRoute.POST("/models/:model/channel/:channel_id/enable", controller.EnableModelChannelCircuit)
+			modelChannelCircuitRoute.POST("/models/:model/channel/:channel_id/disable", controller.DisableModelChannelCircuit)
+			modelChannelCircuitRoute.POST("/models/:model/channel/:channel_id/probe", controller.ProbeModelChannelCircuit)
+		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		{

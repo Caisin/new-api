@@ -1,11 +1,14 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -74,6 +77,10 @@ func BuildOrderedModelChannelCandidates(ctx *gin.Context, group string, modelNam
 		}
 		channel, err := model.CacheGetChannel(policy.ChannelId)
 		if err != nil {
+			if model.IsChannelNotFoundError(err) {
+				result.SkippedChannels[policy.ChannelId] = "channel_missing"
+				continue
+			}
 			return nil, err
 		}
 		if channel == nil || channel.Status != common.ChannelStatusEnabled {
@@ -321,4 +328,172 @@ func applyModelChannelFailureState(state *model.ModelChannelState, reasonType st
 		state.ProbeAfterAt = 0
 	}
 	return true
+}
+
+func GetModelChannelCircuitModels() ([]dto.ModelChannelCircuitModelSummary, error) {
+	modelNames, err := model.ListModelChannelPolicyModels()
+	if err != nil {
+		return nil, err
+	}
+	items := make([]dto.ModelChannelCircuitModelSummary, 0, len(modelNames))
+	for _, modelName := range modelNames {
+		policies, err := model.GetModelChannelPoliciesByModel(modelName)
+		if err != nil {
+			return nil, err
+		}
+		stateMap, err := model.GetModelChannelStateMapByModel(modelName)
+		if err != nil {
+			return nil, err
+		}
+		summary := dto.ModelChannelCircuitModelSummary{
+			Model:       modelName,
+			PolicyCount: len(policies),
+		}
+		manualDisabledChannels := make(map[int]struct{})
+		for _, policy := range policies {
+			if !policy.ManualEnabled {
+				manualDisabledChannels[policy.ChannelId] = struct{}{}
+			}
+		}
+		for _, state := range stateMap {
+			switch state.Status {
+			case model.ModelChannelStateStatusAutoDisabled:
+				summary.AutoDisabledCount++
+			case model.ModelChannelStateStatusManualDisabled:
+				manualDisabledChannels[state.ChannelId] = struct{}{}
+			}
+		}
+		summary.ManualDisabled = len(manualDisabledChannels)
+		items = append(items, summary)
+	}
+	return items, nil
+}
+
+func GetModelChannelCircuitDetail(modelName string) (*dto.ModelChannelCircuitDetail, error) {
+	policies, err := model.GetModelChannelPoliciesByModel(modelName)
+	if err != nil {
+		return nil, err
+	}
+	stateMap, err := model.GetModelChannelStateMapByModel(modelName)
+	if err != nil {
+		return nil, err
+	}
+	detail := &dto.ModelChannelCircuitDetail{
+		Model:    modelName,
+		Channels: make([]dto.ModelChannelCircuitChannelDetail, 0, len(policies)),
+	}
+	for _, policy := range policies {
+		item := dto.ModelChannelCircuitChannelDetail{
+			ChannelId:     policy.ChannelId,
+			Priority:      policy.Priority,
+			ManualEnabled: policy.ManualEnabled,
+			Status:        model.ModelChannelStateStatusEnabled,
+		}
+		channel, err := model.GetChannelById(policy.ChannelId, true)
+		if err != nil {
+			if model.IsChannelNotFoundError(err) {
+				item.ChannelMissing = true
+			} else {
+				return nil, err
+			}
+		} else if channel != nil {
+			item.ChannelName = channel.Name
+			item.ChannelType = channel.Type
+			item.ChannelStatus = channel.Status
+		}
+		if state := stateMap[policy.ChannelId]; state != nil {
+			item.Status = state.Status
+			item.ConsecutiveFailures = state.ConsecutiveFailures
+			item.LastFailureAt = state.LastFailureAt
+			item.ProbeAfterAt = state.ProbeAfterAt
+			item.DisabledAt = state.DisabledAt
+			item.DisableReason = state.DisableReason
+		}
+		detail.Channels = append(detail.Channels, item)
+	}
+	return detail, nil
+}
+
+func SaveModelChannelPolicies(modelName string, items []dto.ModelChannelPolicyItem) error {
+	if len(items) == 0 {
+		return fmt.Errorf("channels 不能为空")
+	}
+	policies := make([]model.ModelChannelPolicy, 0, len(items))
+	for _, item := range items {
+		if item.ChannelId == 0 {
+			continue
+		}
+		policies = append(policies, model.ModelChannelPolicy{
+			Model:         modelName,
+			ChannelId:     item.ChannelId,
+			Priority:      item.Priority,
+			ManualEnabled: item.ManualEnabled,
+		})
+	}
+	if len(policies) == 0 {
+		return fmt.Errorf("channels 不能为空")
+	}
+	channelIDs := make([]int, 0, len(policies))
+	for _, policy := range policies {
+		channelIDs = append(channelIDs, policy.ChannelId)
+	}
+	if err := model.ReplaceModelChannelPolicies(modelName, policies); err != nil {
+		return err
+	}
+	if err := model.DeleteModelChannelStatesNotIn(modelName, channelIDs); err != nil {
+		return err
+	}
+	model.InitChannelCache()
+	return nil
+}
+
+func EnableModelChannelCircuitPair(modelName string, channelID int) error {
+	if _, err := getRequiredModelChannelPolicy(modelName, channelID); err != nil {
+		return err
+	}
+	return model.MutateModelChannelState(modelName, channelID, func(state *model.ModelChannelState) error {
+		state.Status = model.ModelChannelStateStatusEnabled
+		state.ConsecutiveFailures = 0
+		state.LastFailureAt = 0
+		state.ProbeAfterAt = 0
+		state.DisabledAt = 0
+		state.DisableReason = ""
+		return nil
+	})
+}
+
+func DisableModelChannelCircuitPair(modelName string, channelID int) error {
+	if _, err := getRequiredModelChannelPolicy(modelName, channelID); err != nil {
+		return err
+	}
+	return model.MutateModelChannelState(modelName, channelID, func(state *model.ModelChannelState) error {
+		state.Status = model.ModelChannelStateStatusManualDisabled
+		state.DisabledAt = common.GetTimestamp()
+		state.ProbeAfterAt = 0
+		state.DisableReason = "manual_disabled"
+		return nil
+	})
+}
+
+func ProbeModelChannelCircuitPair(modelName string, channelID int) ModelChannelProbeResult {
+	result := ModelChannelProbeResult{
+		Model:     modelName,
+		ChannelId: channelID,
+	}
+	if _, err := getRequiredModelChannelPolicy(modelName, channelID); err != nil {
+		result.Message = err.Error()
+		return result
+	}
+	return ProbeModelChannelPair(context.Background(), modelName, channelID)
+}
+
+func getRequiredModelChannelPolicy(modelName string, channelID int) (*model.ModelChannelPolicy, error) {
+	policy, err := model.GetModelChannelPolicy(modelName, channelID)
+	if err != nil {
+		return nil, err
+	}
+	if policy == nil {
+		return nil, fmt.Errorf("model-channel policy not found")
+	}
+	return policy, nil
 }

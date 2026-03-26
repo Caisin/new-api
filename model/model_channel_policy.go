@@ -1,6 +1,9 @@
 package model
 
 import (
+	"errors"
+	"sort"
+
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
@@ -88,4 +91,61 @@ func GetModelChannelPoliciesByChannelID(channelID int) ([]ModelChannelPolicy, er
 		Order("model ASC").
 		Find(&policies).Error
 	return policies, err
+}
+
+func GetModelChannelPolicy(modelName string, channelID int) (*ModelChannelPolicy, error) {
+	if modelName == "" || channelID == 0 {
+		return nil, nil
+	}
+	var policy ModelChannelPolicy
+	err := DB.Where("model = ? AND channel_id = ?", modelName, channelID).First(&policy).Error
+	if err == nil {
+		return &policy, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return nil, err
+}
+
+func ReplaceModelChannelPolicies(modelName string, policies []ModelChannelPolicy) error {
+	if modelName == "" {
+		return nil
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("model = ?", modelName).Delete(&ModelChannelPolicy{}).Error; err != nil {
+			return err
+		}
+		now := common.GetTimestamp()
+		for i := range policies {
+			policy := policies[i]
+			policy.Model = modelName
+			policy.Id = 0
+			policy.CreatedAt = now
+			policy.UpdatedAt = now
+			originalPriority := policy.Priority
+			originalManualEnabled := policy.ManualEnabled
+			if err := tx.Omit("id").Create(&policy).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&ModelChannelPolicy{}).Where("id = ?", policy.Id).Updates(map[string]interface{}{
+				"priority":       originalPriority,
+				"manual_enabled": originalManualEnabled,
+				"created_at":     policy.CreatedAt,
+				"updated_at":     policy.UpdatedAt,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func ListModelChannelPolicyModels() ([]string, error) {
+	models := make([]string, 0)
+	if err := DB.Model(&ModelChannelPolicy{}).Distinct("model").Pluck("model", &models).Error; err != nil {
+		return nil, err
+	}
+	sort.Strings(models)
+	return models, nil
 }
