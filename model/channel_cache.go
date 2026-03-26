@@ -20,6 +20,14 @@ var model2channelPolicies map[string][]ModelChannelPolicy
 var model2channelStateMap map[string]map[int]*ModelChannelState
 var channelSyncLock sync.RWMutex
 
+// ChannelCacheStateForTest captures the in-memory channel cache state for tests.
+type ChannelCacheStateForTest struct {
+	Group2Model2Channels map[string]map[string][]int
+	ChannelsByID         map[int]*Channel
+	ModelChannelPolicies map[string][]ModelChannelPolicy
+	ModelChannelStateMap map[string]map[int]*ModelChannelState
+}
+
 func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
 		return
@@ -342,4 +350,147 @@ func CacheGetModelChannelStateMapByModel(modelName string) (map[int]*ModelChanne
 		stateMap[channelID] = &stateCopy
 	}
 	return stateMap, nil
+}
+
+func SnapshotChannelCacheStateForTest() ChannelCacheStateForTest {
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	return ChannelCacheStateForTest{
+		Group2Model2Channels: cloneGroupModelChannels(group2model2channels),
+		ChannelsByID:         cloneChannelsByID(channelsIDM),
+		ModelChannelPolicies: cloneModelChannelPolicies(model2channelPolicies),
+		ModelChannelStateMap: cloneModelChannelStateMap(model2channelStateMap),
+	}
+}
+
+func RestoreChannelCacheStateForTest(state ChannelCacheStateForTest) {
+	channelSyncLock.Lock()
+	defer channelSyncLock.Unlock()
+
+	group2model2channels = cloneGroupModelChannels(state.Group2Model2Channels)
+	channelsIDM = cloneChannelsByID(state.ChannelsByID)
+	model2channelPolicies = cloneModelChannelPolicies(state.ModelChannelPolicies)
+	model2channelStateMap = cloneModelChannelStateMap(state.ModelChannelStateMap)
+}
+
+func cloneGroupModelChannels(src map[string]map[string][]int) map[string]map[string][]int {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]map[string][]int, len(src))
+	for group, modelMap := range src {
+		if modelMap == nil {
+			dst[group] = nil
+			continue
+		}
+		clonedModelMap := make(map[string][]int, len(modelMap))
+		for modelName, channelIDs := range modelMap {
+			if channelIDs == nil {
+				clonedModelMap[modelName] = nil
+				continue
+			}
+			clonedIDs := make([]int, len(channelIDs))
+			copy(clonedIDs, channelIDs)
+			clonedModelMap[modelName] = clonedIDs
+		}
+		dst[group] = clonedModelMap
+	}
+	return dst
+}
+
+func cloneChannelsByID(src map[int]*Channel) map[int]*Channel {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[int]*Channel, len(src))
+	for id, channel := range src {
+		if channel == nil {
+			dst[id] = nil
+			continue
+		}
+		channelCopy := *channel
+		if channel.Keys != nil {
+			channelCopy.Keys = append([]string(nil), channel.Keys...)
+		}
+		channelCopy.ChannelInfo.MultiKeyStatusList = cloneIntMap(channel.ChannelInfo.MultiKeyStatusList)
+		channelCopy.ChannelInfo.MultiKeyDisabledReason = cloneStringMap(channel.ChannelInfo.MultiKeyDisabledReason)
+		channelCopy.ChannelInfo.MultiKeyDisabledTime = cloneInt64Map(channel.ChannelInfo.MultiKeyDisabledTime)
+		dst[id] = &channelCopy
+	}
+	return dst
+}
+
+func cloneModelChannelPolicies(src map[string][]ModelChannelPolicy) map[string][]ModelChannelPolicy {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string][]ModelChannelPolicy, len(src))
+	for modelName, policies := range src {
+		if policies == nil {
+			dst[modelName] = nil
+			continue
+		}
+		clonedPolicies := make([]ModelChannelPolicy, len(policies))
+		copy(clonedPolicies, policies)
+		dst[modelName] = clonedPolicies
+	}
+	return dst
+}
+
+func cloneModelChannelStateMap(src map[string]map[int]*ModelChannelState) map[string]map[int]*ModelChannelState {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]map[int]*ModelChannelState, len(src))
+	for modelName, stateMap := range src {
+		if stateMap == nil {
+			dst[modelName] = nil
+			continue
+		}
+		clonedStateMap := make(map[int]*ModelChannelState, len(stateMap))
+		for channelID, state := range stateMap {
+			if state == nil {
+				clonedStateMap[channelID] = nil
+				continue
+			}
+			stateCopy := *state
+			clonedStateMap[channelID] = &stateCopy
+		}
+		dst[modelName] = clonedStateMap
+	}
+	return dst
+}
+
+func cloneIntMap(src map[int]int) map[int]int {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[int]int, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func cloneStringMap(src map[int]string) map[int]string {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[int]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func cloneInt64Map(src map[int]int64) map[int]int64 {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[int]int64, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }

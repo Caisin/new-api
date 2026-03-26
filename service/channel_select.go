@@ -46,6 +46,7 @@ func (p *RetryParam) ResetRetryNextTry() {
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.
+// It remains the legacy fallback path until ordered model-channel candidates are wired into relay retries.
 // 尝试获取一个满足要求的随机渠道。
 //
 // For "auto" tokenGroup with cross-group Retry enabled:

@@ -142,6 +142,59 @@ func TestGetModelChannelPoliciesByModelQueriesDatabase(t *testing.T) {
 	require.Equal(t, 101, policies[1].ChannelId)
 }
 
+func TestModelChannelPolicyInsertPersistsManualEnabledFalse(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&ModelChannelPolicy{}))
+
+	oldDB := DB
+	DB = db
+	t.Cleanup(func() {
+		DB = oldDB
+	})
+
+	policy := &ModelChannelPolicy{
+		Model:         "gpt-4.1",
+		ChannelId:     104,
+		Priority:      7,
+		ManualEnabled: false,
+	}
+	require.NoError(t, policy.Insert())
+
+	policies, err := GetModelChannelPoliciesByModel("gpt-4.1")
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	require.False(t, policies[0].ManualEnabled)
+}
+
+func TestModelChannelPolicyUpdatePersistsManualEnabledFalse(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&ModelChannelPolicy{}))
+
+	oldDB := DB
+	DB = db
+	t.Cleanup(func() {
+		DB = oldDB
+	})
+
+	policy := &ModelChannelPolicy{
+		Model:         "gpt-4.1",
+		ChannelId:     105,
+		Priority:      9,
+		ManualEnabled: true,
+	}
+	require.NoError(t, db.Create(policy).Error)
+
+	policy.ManualEnabled = false
+	require.NoError(t, policy.Update())
+
+	policies, err := GetModelChannelPoliciesByModel("gpt-4.1")
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	require.False(t, policies[0].ManualEnabled)
+}
+
 func TestCacheGetModelChannelPoliciesByModelRefreshesViaInitChannelCache(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -149,12 +202,12 @@ func TestCacheGetModelChannelPoliciesByModelRefreshesViaInitChannelCache(t *test
 
 	setupChannelCacheBackedTest(t, db)
 
-	require.NoError(t, db.Create(&ModelChannelPolicy{
+	require.NoError(t, (&ModelChannelPolicy{
 		Model:         "gpt-cache",
 		ChannelId:     201,
 		Priority:      3,
 		ManualEnabled: true,
-	}).Error)
+	}).Insert())
 
 	InitChannelCache()
 
@@ -164,12 +217,12 @@ func TestCacheGetModelChannelPoliciesByModelRefreshesViaInitChannelCache(t *test
 	require.Equal(t, 201, policies[0].ChannelId)
 	require.Equal(t, int64(3), policies[0].Priority)
 
-	require.NoError(t, db.Create(&ModelChannelPolicy{
+	require.NoError(t, (&ModelChannelPolicy{
 		Model:         "gpt-cache",
 		ChannelId:     202,
 		Priority:      9,
 		ManualEnabled: false,
-	}).Error)
+	}).Insert())
 
 	InitChannelCache()
 	policies, err = CacheGetModelChannelPoliciesByModel("gpt-cache")
@@ -188,18 +241,18 @@ func TestCacheGetModelChannelPoliciesByModelReturnsDefensiveCopy(t *testing.T) {
 
 	setupChannelCacheBackedTest(t, db)
 
-	require.NoError(t, db.Create(&ModelChannelPolicy{
+	require.NoError(t, (&ModelChannelPolicy{
 		Model:         "gpt-cache",
 		ChannelId:     201,
 		Priority:      3,
 		ManualEnabled: true,
-	}).Error)
-	require.NoError(t, db.Create(&ModelChannelPolicy{
+	}).Insert())
+	require.NoError(t, (&ModelChannelPolicy{
 		Model:         "gpt-cache",
 		ChannelId:     202,
 		Priority:      9,
 		ManualEnabled: false,
-	}).Error)
+	}).Insert())
 
 	InitChannelCache()
 
