@@ -65,6 +65,21 @@ func GetModelChannelStateMapByModel(modelName string) (map[int]*ModelChannelStat
 	return stateMap, nil
 }
 
+func ListDueAutoDisabledModelChannelStates(now int64, limit int) ([]ModelChannelState, error) {
+	states := make([]ModelChannelState, 0)
+	if now <= 0 {
+		now = common.GetTimestamp()
+	}
+	query := DB.Where("status = ? AND probe_after_at > 0 AND probe_after_at <= ?", ModelChannelStateStatusAutoDisabled, now).
+		Order("probe_after_at ASC").
+		Order("id ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	err := query.Find(&states).Error
+	return states, err
+}
+
 func GetModelChannelState(modelName string, channelID int) (*ModelChannelState, error) {
 	if modelName == "" || channelID == 0 {
 		return nil, nil

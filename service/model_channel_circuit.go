@@ -209,8 +209,38 @@ func RecordModelChannelFailure(modelName string, channelID int, apiErr *types.Ne
 	threshold := operation_setting.GetModelChannelCircuitFailureThreshold()
 	probeAfterSeconds := int64(operation_setting.GetModelChannelCircuitProbeIntervalMinutes() * 60)
 	reasonType, reason := classifyModelChannelFailure(apiErr)
-	return model.MutateModelChannelState(modelName, channelID, func(state *model.ModelChannelState) error {
+	err := model.MutateModelChannelState(modelName, channelID, func(state *model.ModelChannelState) error {
 		applyModelChannelFailureState(state, reasonType, reason, threshold, probeAfterSeconds)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return MaybeEscalateChannelDisable(channelID)
+}
+
+func ScheduleNextModelChannelProbe(modelName string, channelID int, reason string) error {
+	if modelName == "" || channelID == 0 {
+		return nil
+	}
+	probeAfterSeconds := int64(operation_setting.GetModelChannelCircuitProbeIntervalMinutes() * 60)
+	if probeAfterSeconds <= 0 {
+		probeAfterSeconds = int64(operation_setting.DefaultModelChannelProbeIntervalMinutes * 60)
+	}
+	return model.MutateModelChannelState(modelName, channelID, func(state *model.ModelChannelState) error {
+		if state.Status == model.ModelChannelStateStatusManualDisabled {
+			return nil
+		}
+		now := common.GetTimestamp()
+		state.Status = model.ModelChannelStateStatusAutoDisabled
+		state.LastFailureAt = now
+		if state.DisabledAt == 0 {
+			state.DisabledAt = now
+		}
+		state.ProbeAfterAt = now + probeAfterSeconds
+		if reason != "" {
+			state.DisableReason = reason
+		}
 		return nil
 	})
 }

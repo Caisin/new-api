@@ -44,11 +44,57 @@ func EnableChannel(channelId int, usingKey string, channelName string) {
 	}
 }
 
+func MaybeEscalateChannelDisable(channelID int) error {
+	if channelID == 0 {
+		return nil
+	}
+
+	policies, err := model.GetModelChannelPoliciesByChannelID(channelID)
+	if err != nil {
+		return err
+	}
+	if len(policies) == 0 {
+		return nil
+	}
+
+	hasEffectivePolicy := false
+	for _, policy := range policies {
+		if !policy.ManualEnabled {
+			continue
+		}
+		hasEffectivePolicy = true
+		state, err := model.GetModelChannelState(policy.Model, channelID)
+		if err != nil {
+			return err
+		}
+		if state == nil || !state.IsDisabled() {
+			return nil
+		}
+	}
+	if !hasEffectivePolicy {
+		return nil
+	}
+
+	channel, err := model.GetChannelById(channelID, true)
+	if err != nil || channel == nil {
+		return err
+	}
+	if channel.Status != common.ChannelStatusEnabled {
+		return nil
+	}
+
+	DisableChannel(*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, "", channel.GetAutoBan()), "all configured models are disabled")
+	return nil
+}
+
 func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
 	if !common.AutomaticDisableChannelEnabled {
 		return false
 	}
 	if err == nil {
+		return false
+	}
+	if ShouldTrackModelChannelFailure(err) {
 		return false
 	}
 	if types.IsChannelError(err) {

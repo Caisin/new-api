@@ -77,3 +77,15 @@ func GetModelChannelPoliciesByModel(modelName string) ([]ModelChannelPolicy, err
 		Find(&policies).Error
 	return policies, err
 }
+
+func GetModelChannelPoliciesByChannelID(channelID int) ([]ModelChannelPolicy, error) {
+	policies := make([]ModelChannelPolicy, 0)
+	if channelID == 0 {
+		return policies, nil
+	}
+	err := DB.Where("channel_id = ?", channelID).
+		Order("priority DESC").
+		Order("model ASC").
+		Find(&policies).Error
+	return policies, err
+}

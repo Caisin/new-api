@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -870,13 +871,39 @@ func TestAllChannels(c *gin.Context) {
 }
 
 var autoTestChannelsOnce sync.Once
+var registerModelChannelProbeExecutorOnce sync.Once
+
+func registerModelChannelProbeExecutor() {
+	registerModelChannelProbeExecutorOnce.Do(func() {
+		service.RegisterModelChannelProbeExecutor(func(ctx context.Context, modelName string, channel *model.Channel) service.ModelChannelProbeAttemptResult {
+			_ = ctx
+			result := testChannel(channel, modelName, "", false)
+			attempt := service.ModelChannelProbeAttemptResult{}
+			if result.context != nil {
+				attempt.UsingKey = common.GetContextKeyString(result.context, constant.ContextKeyChannelKey)
+			}
+			if result.newAPIError != nil {
+				attempt.Err = result.newAPIError
+				return attempt
+			}
+			if result.localErr != nil {
+				attempt.Err = types.NewError(result.localErr, types.ErrorCodeDoRequestFailed)
+			}
+			return attempt
+		})
+	})
+}
 
 func AutomaticallyTestChannels() {
 	// 只在Master节点定时测试渠道
 	if !common.IsMasterNode {
 		return
 	}
+	registerModelChannelProbeExecutor()
 	autoTestChannelsOnce.Do(func() {
+		gopool.Go(func() {
+			service.AutomaticallyProbeModelChannels()
+		})
 		for {
 			if !operation_setting.GetMonitorSetting().AutoTestChannelEnabled {
 				time.Sleep(1 * time.Minute)
