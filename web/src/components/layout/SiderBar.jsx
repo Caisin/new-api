@@ -47,6 +47,7 @@ const routerMap = {
   task: '/console/task',
   models: '/console/models',
   deployment: '/console/deployment',
+  model_channel_circuit: '/console/model-channel-circuit',
   playground: '/console/playground',
   personal: '/console/personal',
 };
@@ -169,6 +170,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('模型部署'),
         itemKey: 'deployment',
         to: '/deployment',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('模型渠道熔断'),
+        itemKey: 'model_channel_circuit',
+        to: '/console/model-channel-circuit',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

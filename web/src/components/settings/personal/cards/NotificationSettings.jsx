@@ -87,6 +87,7 @@ const NotificationSettings = ({
       channel: true,
       models: true,
       deployment: true,
+      model_channel_circuit: true,
       subscription: true,
       redemption: true,
       user: true,
@@ -171,6 +172,7 @@ const NotificationSettings = ({
         channel: true,
         models: true,
         deployment: true,
+        model_channel_circuit: true,
         subscription: true,
         redemption: true,
         user: true,
@@ -298,6 +300,11 @@ const NotificationSettings = ({
           key: 'deployment',
           title: t('模型部署'),
           description: t('模型部署管理'),
+        },
+        {
+          key: 'model_channel_circuit',
+          title: t('模型渠道熔断'),
+          description: t('模型级渠道优先级与熔断管理'),
         },
         {
           key: 'subscription',
@@ -478,7 +485,10 @@ const NotificationSettings = ({
                     checkedText={t('开')}
                     uncheckedText={t('关')}
                     onChange={(value) =>
-                      handleFormChange('upstreamModelUpdateNotifyEnabled', value)
+                      handleFormChange(
+                        'upstreamModelUpdateNotifyEnabled',
+                        value,
+                      )
                     }
                     extraText={t(
                       '仅管理员可用。开启后，当系统定时检测全部渠道发现上游模型变更或检测异常时，将按你选择的通知方式发送汇总通知；渠道或模型过多时会自动省略部分明细。',
