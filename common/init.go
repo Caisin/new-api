@@ -15,17 +15,57 @@ import (
 )
 
 var (
-	Port         = flag.Int("port", 3000, "the listening port")
-	PrintVersion = flag.Bool("version", false, "print version and exit")
-	PrintHelp    = flag.Bool("help", false, "print help and exit")
-	LogDir       = flag.String("log-dir", "./logs", "specify the log directory")
+	Port             = flag.Int("port", 3000, "the listening port")
+	PrintVersion     = flag.Bool("version", false, "print version and exit")
+	PrintHelp        = flag.Bool("help", false, "print help and exit")
+	LogDir           = flag.String("log-dir", "./logs", "specify the log directory")
+	SQLiteToPostgres = flag.Bool("sqlite-to-postgres", false, "migrate business data from sqlite to postgres and exit")
+	SQLitePathFlag   = flag.String("sqlite-path", "", "source sqlite database path")
+	PostgresDSNFlag  = flag.String("postgres-dsn", "", "target postgres dsn")
+	BatchSizeFlag    = flag.Int("batch-size", 1000, "batch size for sqlite to postgres migration")
 )
+
+type SQLiteToPostgresMigrationConfig struct {
+	Enabled     bool
+	SQLitePath  string
+	PostgresDSN string
+	BatchSize   int
+}
 
 func printHelp() {
 	fmt.Println("NewAPI(Based OneAPI) " + Version + " - The next-generation LLM gateway and AI asset management system supports multiple languages.")
 	fmt.Println("Original Project: OneAPI by JustSong - https://github.com/songquanpeng/one-api")
 	fmt.Println("Maintainer: QuantumNous - https://github.com/QuantumNous/new-api")
-	fmt.Println("Usage: newapi [--port <port>] [--log-dir <log directory>] [--version] [--help]")
+	fmt.Println("Usage: newapi [--port <port>] [--log-dir <log directory>] [--version] [--help] [--sqlite-to-postgres --sqlite-path <path> --postgres-dsn <dsn> [--batch-size <n>]]")
+}
+
+func ValidateSQLiteToPostgresMigrationConfig(cfg SQLiteToPostgresMigrationConfig) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(cfg.SQLitePath) == "" {
+		return fmt.Errorf("sqlite-to-postgres requires --sqlite-path")
+	}
+	if strings.TrimSpace(cfg.PostgresDSN) == "" {
+		return fmt.Errorf("sqlite-to-postgres requires --postgres-dsn")
+	}
+	if !strings.HasPrefix(cfg.PostgresDSN, "postgres://") && !strings.HasPrefix(cfg.PostgresDSN, "postgresql://") {
+		return fmt.Errorf("sqlite-to-postgres requires a PostgreSQL DSN")
+	}
+	if cfg.BatchSize <= 0 {
+		return fmt.Errorf("sqlite-to-postgres requires --batch-size > 0")
+	}
+	return nil
+}
+
+func GetSQLiteToPostgresMigrationConfig() (SQLiteToPostgresMigrationConfig, error) {
+	cfg := SQLiteToPostgresMigrationConfig{
+		Enabled:     *SQLiteToPostgres,
+		SQLitePath:  strings.TrimSpace(*SQLitePathFlag),
+		PostgresDSN: strings.TrimSpace(*PostgresDSNFlag),
+		BatchSize:   *BatchSizeFlag,
+	}
+	return cfg, ValidateSQLiteToPostgresMigrationConfig(cfg)
 }
 
 func InitEnv() {

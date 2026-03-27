@@ -43,11 +43,7 @@ var indexPage []byte
 func main() {
 	startTime := time.Now()
 
-	err := InitResources()
-	if err != nil {
-		common.FatalLog("failed to initialize resources: " + err.Error())
-		return
-	}
+	InitBaseResources()
 
 	common.SysLog("New API " + common.Version + " started")
 	if os.Getenv("GIN_MODE") != "debug" {
@@ -55,6 +51,25 @@ func main() {
 	}
 	if common.DebugEnabled {
 		common.SysLog("running in debug mode")
+	}
+
+	migrationConfig, err := common.GetSQLiteToPostgresMigrationConfig()
+	if err != nil {
+		common.FatalLog("invalid sqlite-to-postgres flags: " + err.Error())
+		return
+	}
+	if migrationConfig.Enabled {
+		err = model.RunSQLiteToPostgresMigration(migrationConfig.SQLitePath, migrationConfig.PostgresDSN, migrationConfig.BatchSize)
+		if err != nil {
+			common.FatalLog("sqlite to postgres migration failed: " + err.Error())
+		}
+		return
+	}
+
+	err = InitRuntimeResources()
+	if err != nil {
+		common.FatalLog("failed to initialize resources: " + err.Error())
+		return
 	}
 
 	defer func() {
@@ -240,6 +255,11 @@ func InjectGoogleAnalytics() {
 }
 
 func InitResources() error {
+	InitBaseResources()
+	return InitRuntimeResources()
+}
+
+func InitBaseResources() {
 	// Initialize resources here if needed
 	// This is a placeholder function for future resource initialization
 	err := godotenv.Load(".env")
@@ -260,9 +280,11 @@ func InitResources() error {
 	service.InitHttpClient()
 
 	service.InitTokenEncoders()
+}
 
+func InitRuntimeResources() error {
 	// Initialize SQL Database
-	err = model.InitDB()
+	err := model.InitDB()
 	if err != nil {
 		common.FatalLog("failed to initialize database: " + err.Error())
 		return err
