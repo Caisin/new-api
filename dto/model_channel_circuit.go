@@ -15,6 +15,7 @@ type ModelChannelCircuitModelSummary struct {
 	PolicyCount       int    `json:"policy_count"`
 	AutoDisabledCount int    `json:"auto_disabled_count"`
 	ManualDisabled    int    `json:"manual_disabled_count"`
+	BootstrapNeeded   bool   `json:"bootstrap_needed"`
 }
 
 type ModelChannelCircuitChannelDetail struct {
@@ -34,6 +35,7 @@ type ModelChannelCircuitChannelDetail struct {
 }
 
 type ModelChannelCircuitDetail struct {
-	Model    string                             `json:"model"`
-	Channels []ModelChannelCircuitChannelDetail `json:"channels"`
+	Model           string                             `json:"model"`
+	BootstrapNeeded bool                               `json:"bootstrap_needed"`
+	Channels        []ModelChannelCircuitChannelDetail `json:"channels"`
 }

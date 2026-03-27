@@ -30,6 +30,7 @@ import {
   renderQuota,
   renderNumber,
   getLogOther,
+  getRetryPathText,
   copy,
   renderClaudeLogContent,
   renderLogContent,
@@ -392,6 +393,15 @@ export const useLogsData = () => {
           key: t('Request ID'),
           value: logs[i].request_id,
         });
+      }
+      if (isAdminUser && (logs[i].type === 2 || logs[i].type === 5)) {
+        const retryPathText = getRetryPathText(other, logs[i].channel);
+        if (retryPathText) {
+          expandDataLocal.push({
+            key: t('重试路径'),
+            value: retryPathText,
+          });
+        }
       }
       if (other?.ws || other?.audio) {
         expandDataLocal.push({

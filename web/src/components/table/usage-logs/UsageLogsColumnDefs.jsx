@@ -31,6 +31,7 @@ import {
   renderQuota,
   stringToColor,
   getLogOther,
+  getRetryPathText,
   renderModelTag,
   renderModelPriceSimple,
 } from '../../../helpers';
@@ -857,25 +858,29 @@ export const getLogsColumns = ({
         if (!(record.type === 2 || record.type === 5)) {
           return <></>;
         }
-        let content = t('渠道') + `：${record.channel}`;
-        if (record.other !== '') {
-          let other = JSON.parse(record.other);
-          if (other === null) {
-            return <></>;
-          }
-          if (other.admin_info !== undefined) {
-            if (
-              other.admin_info.use_channel !== null &&
-              other.admin_info.use_channel !== undefined &&
-              other.admin_info.use_channel !== ''
-            ) {
-              let useChannel = other.admin_info.use_channel;
-              let useChannelStr = useChannel.join('->');
-              content = t('渠道') + `：${useChannelStr}`;
-            }
-          }
+        const other = getLogOther(record.other);
+        if (other === null) {
+          return <></>;
         }
-        return isAdminUser ? <div>{content}</div> : <></>;
+        const retryPathText = getRetryPathText(other, record.channel);
+        const content = `${t('渠道')}：${retryPathText}`;
+        return isAdminUser && retryPathText ? (
+          <div style={{ maxWidth: 240 }}>
+            <Typography.Text
+              ellipsis={{
+                showTooltip: {
+                  type: 'popover',
+                  opts: { style: { maxWidth: 520, wordBreak: 'break-all' } },
+                },
+              }}
+              style={{ maxWidth: '100%', display: 'inline-block', marginBottom: 0 }}
+            >
+              {content}
+            </Typography.Text>
+          </div>
+        ) : (
+          <></>
+        );
       },
     },
     {

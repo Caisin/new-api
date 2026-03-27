@@ -159,6 +159,11 @@ export const useModelChannelCircuitData = () => {
     return saved !== draft;
   }, [detail?.channels, draftChannels]);
 
+  const canSavePolicies = useMemo(
+    () => hasUnsavedChanges || Boolean(detail?.bootstrap_needed),
+    [detail?.bootstrap_needed, hasUnsavedChanges],
+  );
+
   const moveDraftChannel = useCallback((channelId, direction) => {
     setDraftChannels((current) => {
       const next = [...current];
@@ -281,6 +286,7 @@ export const useModelChannelCircuitData = () => {
     statusFilter,
     actionLoadingKey,
     hasUnsavedChanges,
+    canSavePolicies,
     setSearchKeyword,
     setStatusFilter,
     openDetail,

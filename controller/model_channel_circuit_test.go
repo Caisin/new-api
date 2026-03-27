@@ -128,6 +128,104 @@ func TestGetModelChannelCircuitDetailReturnsMissingChannelRows(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "\"channel_missing\":true")
 }
 
+func TestGetModelChannelCircuitModelsIncludesAbilityOnlyModelForBootstrap(t *testing.T) {
+	db := setupModelChannelCircuitControllerTestDB(t)
+
+	channel := &model.Channel{
+		Id:       121,
+		Name:     "channel-121",
+		Key:      "test-key",
+		Status:   common.ChannelStatusEnabled,
+		Models:   "gpt-bootstrap-controller",
+		Group:    "default",
+		Priority: common.GetPointer(int64(30)),
+		AutoBan:  common.GetPointer(1),
+	}
+	require.NoError(t, db.Create(channel).Error)
+	require.NoError(t, channel.AddAbilities(nil))
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/model_channel_circuit/models", nil, 1)
+
+	GetModelChannelCircuitModels(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success)
+	require.Contains(t, recorder.Body.String(), "\"model\":\"gpt-bootstrap-controller\"")
+	require.Contains(t, recorder.Body.String(), "\"bootstrap_needed\":true")
+}
+
+func TestGetModelChannelCircuitDetailReturnsBootstrapDraftFromAbilities(t *testing.T) {
+	db := setupModelChannelCircuitControllerTestDB(t)
+
+	channelA := &model.Channel{
+		Id:       131,
+		Name:     "channel-131",
+		Key:      "test-key-a",
+		Status:   common.ChannelStatusEnabled,
+		Models:   "gpt-bootstrap-controller-detail",
+		Group:    "default",
+		Priority: common.GetPointer(int64(10)),
+		AutoBan:  common.GetPointer(1),
+	}
+	channelB := &model.Channel{
+		Id:       132,
+		Name:     "channel-132",
+		Key:      "test-key-b",
+		Status:   common.ChannelStatusEnabled,
+		Models:   "gpt-bootstrap-controller-detail",
+		Group:    "vip",
+		Priority: common.GetPointer(int64(30)),
+		AutoBan:  common.GetPointer(1),
+	}
+	require.NoError(t, db.Create(channelA).Error)
+	require.NoError(t, db.Create(channelB).Error)
+	require.NoError(t, channelA.AddAbilities(nil))
+	require.NoError(t, channelB.AddAbilities(nil))
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/model_channel_circuit/models/gpt-bootstrap-controller-detail", nil, 1)
+	ctx.Params = gin.Params{{Key: "model", Value: "gpt-bootstrap-controller-detail"}}
+
+	GetModelChannelCircuitDetail(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success)
+	require.Contains(t, recorder.Body.String(), "\"bootstrap_needed\":true")
+	require.Contains(t, recorder.Body.String(), "\"channel_id\":132")
+	require.Contains(t, recorder.Body.String(), "\"priority\":30")
+}
+
+func TestEnableModelChannelCircuitBootstrapsPoliciesFromAbilities(t *testing.T) {
+	db := setupModelChannelCircuitControllerTestDB(t)
+
+	channel := &model.Channel{
+		Id:       141,
+		Name:     "channel-141",
+		Key:      "test-key",
+		Status:   common.ChannelStatusEnabled,
+		Models:   "gpt-bootstrap-enable-controller",
+		Group:    "default",
+		Priority: common.GetPointer(int64(30)),
+		AutoBan:  common.GetPointer(1),
+	}
+	require.NoError(t, db.Create(channel).Error)
+	require.NoError(t, channel.AddAbilities(nil))
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/model_channel_circuit/models/gpt-bootstrap-enable-controller/channel/141/enable", nil, 1)
+	ctx.Params = gin.Params{
+		{Key: "model", Value: "gpt-bootstrap-enable-controller"},
+		{Key: "channel_id", Value: "141"},
+	}
+
+	EnableModelChannelCircuit(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success)
+
+	policy, err := model.GetModelChannelPolicy("gpt-bootstrap-enable-controller", 141)
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+}
+
 func TestUpdateModelChannelPoliciesReordersAndCreatesMissingRows(t *testing.T) {
 	setupModelChannelCircuitControllerTestDB(t)
 

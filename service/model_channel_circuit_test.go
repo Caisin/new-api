@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -495,6 +496,77 @@ func TestGetModelChannelCircuitModelsCountsPolicyManualDisable(t *testing.T) {
 	require.Len(t, items, 1)
 	require.Equal(t, 0, items[0].AutoDisabledCount)
 	require.Equal(t, 2, items[0].ManualDisabled)
+}
+
+func TestGetModelChannelCircuitModelsIncludesAbilityOnlyModelForBootstrap(t *testing.T) {
+	db := setupModelChannelCircuitTestDB(t)
+
+	createModelCircuitTestChannel(t, db, 101, "default", "gpt-bootstrap", common.ChannelStatusEnabled, 30, 1)
+
+	items, err := GetModelChannelCircuitModels()
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "gpt-bootstrap", items[0].Model)
+	require.Equal(t, 0, items[0].PolicyCount)
+	require.True(t, items[0].BootstrapNeeded)
+}
+
+func TestGetModelChannelCircuitDetailBootstrapsFromAbilitiesWhenNoPolicies(t *testing.T) {
+	db := setupModelChannelCircuitTestDB(t)
+
+	createModelCircuitTestChannel(t, db, 111, "default", "gpt-bootstrap-detail", common.ChannelStatusEnabled, 10, 1)
+	createModelCircuitTestChannel(t, db, 112, "vip", "gpt-bootstrap-detail", common.ChannelStatusEnabled, 30, 1)
+	createModelCircuitTestChannel(t, db, 113, "default", "gpt-bootstrap-detail", common.ChannelStatusEnabled, 20, 1)
+
+	detail, err := GetModelChannelCircuitDetail("gpt-bootstrap-detail")
+	require.NoError(t, err)
+	require.True(t, detail.BootstrapNeeded)
+	require.Len(t, detail.Channels, 3)
+	require.Equal(t, 112, detail.Channels[0].ChannelId)
+	require.Equal(t, int64(30), detail.Channels[0].Priority)
+	require.Equal(t, 113, detail.Channels[1].ChannelId)
+	require.Equal(t, 111, detail.Channels[2].ChannelId)
+	require.True(t, detail.Channels[0].ManualEnabled)
+	require.Equal(t, model.ModelChannelStateStatusEnabled, detail.Channels[0].Status)
+}
+
+func TestEnableModelChannelCircuitPairBootstrapsPoliciesWhenModelUninitialized(t *testing.T) {
+	db := setupModelChannelCircuitTestDB(t)
+
+	createModelCircuitTestChannel(t, db, 121, "default", "gpt-bootstrap-enable", common.ChannelStatusEnabled, 30, 1)
+	createModelCircuitTestChannel(t, db, 122, "vip", "gpt-bootstrap-enable", common.ChannelStatusEnabled, 20, 1)
+
+	err := EnableModelChannelCircuitPair("gpt-bootstrap-enable", 121)
+	require.NoError(t, err)
+
+	policies, err := model.GetModelChannelPoliciesByModel("gpt-bootstrap-enable")
+	require.NoError(t, err)
+	require.Len(t, policies, 2)
+	require.Equal(t, 121, policies[0].ChannelId)
+	require.Equal(t, int64(30), policies[0].Priority)
+	require.True(t, policies[0].ManualEnabled)
+
+	state, err := model.GetModelChannelState("gpt-bootstrap-enable", 121)
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.Equal(t, model.ModelChannelStateStatusEnabled, state.Status)
+}
+
+func TestProbeModelChannelCircuitPairBootstrapsPoliciesWhenModelUninitialized(t *testing.T) {
+	db := setupModelChannelCircuitTestDB(t)
+
+	createModelCircuitTestChannel(t, db, 131, "default", "gpt-bootstrap-probe", common.ChannelStatusEnabled, 30, 1)
+	restoreProbeExecutorForTest(t, func(ctx context.Context, modelName string, channel *model.Channel) ModelChannelProbeAttemptResult {
+		return ModelChannelProbeAttemptResult{UsingKey: "test-key"}
+	})
+
+	result := ProbeModelChannelCircuitPair("gpt-bootstrap-probe", 131)
+	require.True(t, result.Success)
+
+	policy, err := model.GetModelChannelPolicy("gpt-bootstrap-probe", 131)
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	require.Equal(t, int64(30), policy.Priority)
 }
 
 func TestEnableModelChannelCircuitPairRejectsUnknownPolicy(t *testing.T) {

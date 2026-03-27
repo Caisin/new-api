@@ -18,7 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Button, Empty, SideSheet, Space, Typography } from '@douyinfe/semi-ui';
+import {
+  Banner,
+  Button,
+  Empty,
+  SideSheet,
+  Space,
+  Typography,
+} from '@douyinfe/semi-ui';
 import { IconClose } from '@douyinfe/semi-icons';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import ModelChannelCircuitDetailTable from '../ModelChannelCircuitDetailTable';
@@ -33,6 +40,7 @@ const EditModelChannelPolicyModal = ({
   detailLoading,
   saving,
   hasUnsavedChanges,
+  canSavePolicies,
   refreshCurrentDetail,
   resetDraft,
   savePolicies,
@@ -74,7 +82,9 @@ const EditModelChannelPolicyModal = ({
       footer={
         <div className='flex flex-col md:flex-row md:items-center md:justify-between gap-3 w-full'>
           <Text type='secondary'>
-            {hasUnsavedChanges
+            {detail?.bootstrap_needed
+              ? t('当前初始化草稿尚未保存，保存后才能形成正式模型渠道策略')
+              : hasUnsavedChanges
               ? t('当前有未保存的排序或策略状态变更')
               : t('当前草稿与服务端一致')}
           </Text>
@@ -90,14 +100,25 @@ const EditModelChannelPolicyModal = ({
               type='primary'
               onClick={savePolicies}
               loading={saving}
-              disabled={!hasUnsavedChanges}
+              disabled={!canSavePolicies}
             >
-              {t('保存排序')}
+              {detail?.bootstrap_needed ? t('初始化并保存') : t('保存排序')}
             </Button>
           </Space>
         </div>
       }
     >
+      {detail?.bootstrap_needed ? (
+        <Banner
+          type='info'
+          bordered={false}
+          closeIcon={null}
+          style={{ marginBottom: 12 }}
+          description={t(
+            '当前模型还没有保存过专用策略，下面展示的是根据已启用 abilities 自动生成的初始化草稿；保存后才会写入模型渠道策略表。',
+          )}
+        />
+      ) : null}
       {detailLoading || detail?.channels?.length ? (
         <ModelChannelCircuitDetailTable
           channels={channels}

@@ -33,7 +33,24 @@ const ModelChannelCircuitPage = () => {
 
   return (
     <>
-      <EditModelChannelPolicyModal {...circuitData} />
+      <EditModelChannelPolicyModal
+        visible={circuitData.drawerVisible}
+        onClose={circuitData.closeDetail}
+        detail={circuitData.detail}
+        channels={circuitData.draftChannels}
+        detailLoading={circuitData.detailLoading}
+        saving={circuitData.saving}
+        hasUnsavedChanges={circuitData.hasUnsavedChanges}
+        canSavePolicies={circuitData.canSavePolicies}
+        refreshCurrentDetail={circuitData.refreshCurrentDetail}
+        resetDraft={circuitData.resetDraft}
+        savePolicies={circuitData.savePolicies}
+        moveDraftChannel={circuitData.moveDraftChannel}
+        toggleDraftManualEnabled={circuitData.toggleDraftManualEnabled}
+        runChannelAction={circuitData.runChannelAction}
+        actionLoadingKey={circuitData.actionLoadingKey}
+        t={circuitData.t}
+      />
 
       <CardPro
         type='type3'

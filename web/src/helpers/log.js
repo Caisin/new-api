@@ -31,3 +31,17 @@ export function getLogOther(otherStr) {
     return null;
   }
 }
+
+export function getRetryPathText(other, defaultChannel) {
+  if (other?.retry_path_text) {
+    return String(other.retry_path_text);
+  }
+  const useChannel = other?.admin_info?.use_channel;
+  if (Array.isArray(useChannel) && useChannel.length > 0) {
+    return useChannel.join(' -> ');
+  }
+  if (defaultChannel !== undefined && defaultChannel !== null && defaultChannel !== '') {
+    return String(defaultChannel);
+  }
+  return '';
+}

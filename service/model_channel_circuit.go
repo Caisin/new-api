@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -331,10 +332,26 @@ func applyModelChannelFailureState(state *model.ModelChannelState, reasonType st
 }
 
 func GetModelChannelCircuitModels() ([]dto.ModelChannelCircuitModelSummary, error) {
-	modelNames, err := model.ListModelChannelPolicyModels()
+	policyModelNames, err := model.ListModelChannelPolicyModels()
 	if err != nil {
 		return nil, err
 	}
+	modelNameSet := make(map[string]struct{}, len(policyModelNames))
+	for _, modelName := range policyModelNames {
+		modelNameSet[modelName] = struct{}{}
+	}
+	for _, modelName := range model.GetEnabledModels() {
+		if modelName == "" {
+			continue
+		}
+		modelNameSet[modelName] = struct{}{}
+	}
+	modelNames := make([]string, 0, len(modelNameSet))
+	for modelName := range modelNameSet {
+		modelNames = append(modelNames, modelName)
+	}
+	sort.Strings(modelNames)
+
 	items := make([]dto.ModelChannelCircuitModelSummary, 0, len(modelNames))
 	for _, modelName := range modelNames {
 		policies, err := model.GetModelChannelPoliciesByModel(modelName)
@@ -346,8 +363,9 @@ func GetModelChannelCircuitModels() ([]dto.ModelChannelCircuitModelSummary, erro
 			return nil, err
 		}
 		summary := dto.ModelChannelCircuitModelSummary{
-			Model:       modelName,
-			PolicyCount: len(policies),
+			Model:           modelName,
+			PolicyCount:     len(policies),
+			BootstrapNeeded: len(policies) == 0,
 		}
 		policyChannelIDs := make(map[int]struct{}, len(policies))
 		manualDisabledChannels := make(map[int]struct{})
@@ -384,8 +402,21 @@ func GetModelChannelCircuitDetail(modelName string) (*dto.ModelChannelCircuitDet
 		return nil, err
 	}
 	detail := &dto.ModelChannelCircuitDetail{
-		Model:    modelName,
-		Channels: make([]dto.ModelChannelCircuitChannelDetail, 0, len(policies)),
+		Model:           modelName,
+		BootstrapNeeded: len(policies) == 0,
+		Channels:        make([]dto.ModelChannelCircuitChannelDetail, 0, len(policies)),
+	}
+	if len(policies) == 0 {
+		bootstrapChannels, err := buildBootstrapModelChannelCircuitDetail(modelName)
+		if err != nil {
+			return nil, err
+		}
+		if len(bootstrapChannels) == 0 {
+			detail.BootstrapNeeded = false
+			return detail, nil
+		}
+		detail.Channels = bootstrapChannels
+		return detail, nil
 	}
 	for _, policy := range policies {
 		item := dto.ModelChannelCircuitChannelDetail{
@@ -417,6 +448,121 @@ func GetModelChannelCircuitDetail(modelName string) (*dto.ModelChannelCircuitDet
 		detail.Channels = append(detail.Channels, item)
 	}
 	return detail, nil
+}
+
+func buildBootstrapModelChannelCircuitDetail(modelName string) ([]dto.ModelChannelCircuitChannelDetail, error) {
+	channels, err := getBootstrapChannelsForModel(modelName)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]dto.ModelChannelCircuitChannelDetail, 0, len(channels))
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		priority := int64(0)
+		if channel.Priority != nil {
+			priority = *channel.Priority
+		}
+		items = append(items, dto.ModelChannelCircuitChannelDetail{
+			ChannelId:     channel.Id,
+			ChannelName:   channel.Name,
+			ChannelType:   channel.Type,
+			ChannelStatus: channel.Status,
+			Priority:      priority,
+			ManualEnabled: true,
+			Status:        model.ModelChannelStateStatusEnabled,
+		})
+	}
+	return items, nil
+}
+
+func getBootstrapChannelsForModel(modelName string) ([]*model.Channel, error) {
+	channelIDs, err := model.GetEnabledChannelIDsByModel(modelName)
+	if err != nil {
+		return nil, err
+	}
+	if len(channelIDs) == 0 {
+		return []*model.Channel{}, nil
+	}
+	channels, err := model.GetChannelsByIds(channelIDs)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(channels, func(i, j int) bool {
+		leftPriority := int64(0)
+		rightPriority := int64(0)
+		if channels[i] != nil && channels[i].Priority != nil {
+			leftPriority = *channels[i].Priority
+		}
+		if channels[j] != nil && channels[j].Priority != nil {
+			rightPriority = *channels[j].Priority
+		}
+		if leftPriority == rightPriority {
+			leftID := 0
+			rightID := 0
+			if channels[i] != nil {
+				leftID = channels[i].Id
+			}
+			if channels[j] != nil {
+				rightID = channels[j].Id
+			}
+			return leftID < rightID
+		}
+		return leftPriority > rightPriority
+	})
+	return channels, nil
+}
+
+func bootstrapModelChannelPoliciesFromAbilities(modelName string, requiredChannelID int) error {
+	if modelName == "" {
+		return fmt.Errorf("model-channel policy not found")
+	}
+	existingPolicies, err := model.GetModelChannelPoliciesByModel(modelName)
+	if err != nil {
+		return err
+	}
+	if len(existingPolicies) > 0 {
+		return nil
+	}
+	channels, err := getBootstrapChannelsForModel(modelName)
+	if err != nil {
+		return err
+	}
+	if len(channels) == 0 {
+		return fmt.Errorf("model-channel policy not found")
+	}
+	policies := make([]model.ModelChannelPolicy, 0, len(channels))
+	requiredFound := requiredChannelID == 0
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		if channel.Id == requiredChannelID {
+			requiredFound = true
+		}
+		priority := int64(0)
+		if channel.Priority != nil {
+			priority = *channel.Priority
+		}
+		policies = append(policies, model.ModelChannelPolicy{
+			Model:         modelName,
+			ChannelId:     channel.Id,
+			Priority:      priority,
+			ManualEnabled: true,
+		})
+	}
+	if !requiredFound {
+		return fmt.Errorf("model-channel policy not found")
+	}
+	if len(policies) == 0 {
+		return fmt.Errorf("model-channel policy not found")
+	}
+	if err := model.ReplaceModelChannelPolicies(modelName, policies); err != nil {
+		return err
+	}
+	model.InitChannelCache()
+	return nil
 }
 
 func SaveModelChannelPolicies(modelName string, items []dto.ModelChannelPolicyItem) error {
@@ -491,7 +637,16 @@ func getRequiredModelChannelPolicyAndChannel(modelName string, channelID int) (*
 		return nil, nil, err
 	}
 	if policy == nil {
-		return nil, nil, fmt.Errorf("model-channel policy not found")
+		if err := bootstrapModelChannelPoliciesFromAbilities(modelName, channelID); err != nil {
+			return nil, nil, err
+		}
+		policy, err = model.GetModelChannelPolicy(modelName, channelID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if policy == nil {
+			return nil, nil, fmt.Errorf("model-channel policy not found")
+		}
 	}
 	channel, err := model.GetChannelById(channelID, true)
 	if err != nil {

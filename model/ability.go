@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -50,6 +51,21 @@ func GetEnabledModels() []string {
 	// Find distinct models
 	DB.Table("abilities").Where("enabled = ?", true).Distinct("model").Pluck("model", &models)
 	return models
+}
+
+func GetEnabledChannelIDsByModel(modelName string) ([]int, error) {
+	channelIDs := make([]int, 0)
+	if modelName == "" {
+		return channelIDs, nil
+	}
+	if err := DB.Table("abilities").
+		Where("model = ? AND enabled = ?", modelName, true).
+		Distinct("channel_id").
+		Pluck("channel_id", &channelIDs).Error; err != nil {
+		return nil, err
+	}
+	sort.Ints(channelIDs)
+	return channelIDs, nil
 }
 
 func GetAllEnableAbilities() []Ability {

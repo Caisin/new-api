@@ -46,6 +46,11 @@ const ModelChannelCircuitTable = ({
         render: (text, record) => (
           <Space>
             <span>{text}</span>
+            {record.bootstrap_needed ? (
+              <Tag color='cyan' shape='circle'>
+                {t('待初始化')}
+              </Tag>
+            ) : null}
             {selectedModel === record.model ? (
               <Tag color='blue' shape='circle'>
                 {t('编辑中')}
@@ -57,6 +62,7 @@ const ModelChannelCircuitTable = ({
       {
         title: t('渠道数'),
         dataIndex: 'policy_count',
+        render: (value, record) => (record.bootstrap_needed ? t('未初始化') : value),
       },
       {
         title: t('自动熔断'),
