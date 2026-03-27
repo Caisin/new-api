@@ -51,6 +51,8 @@ export default function GeneralSettings(props) {
     'general_setting.custom_currency_exchange_rate': '',
     QuotaPerUnit: '',
     RetryTimes: '',
+    'model_channel_circuit_setting.failure_threshold': 3,
+    'model_channel_circuit_setting.probe_interval_minutes': 5,
     USDExchangeRate: '',
     DisplayTokenStatEnabled: false,
     DefaultCollapseSidebar: false,
@@ -199,6 +201,32 @@ export default function GeneralSettings(props) {
                   placeholder={t('失败重试次数')}
                   onChange={handleFieldChange('RetryTimes')}
                   showClear
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'model_channel_circuit_setting.failure_threshold'}
+                  label={t('模型熔断阈值')}
+                  initValue={3}
+                  min={1}
+                  max={99}
+                  extraText={t('同一模型在单渠道连续失败达到该次数后自动熔断')}
+                  onChange={handleFieldChange(
+                    'model_channel_circuit_setting.failure_threshold',
+                  )}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'model_channel_circuit_setting.probe_interval_minutes'}
+                  label={t('模型探测间隔(分钟)')}
+                  initValue={5}
+                  min={1}
+                  max={1440}
+                  extraText={t('熔断后按该间隔执行真实探测，成功则恢复启用')}
+                  onChange={handleFieldChange(
+                    'model_channel_circuit_setting.probe_interval_minutes',
+                  )}
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>

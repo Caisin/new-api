@@ -27,6 +27,36 @@ const normalizeDraftChannels = (channels = []) =>
     priority: (list.length - index) * 10,
   }));
 
+const reorderDraftChannels = (
+  channels = [],
+  sourceChannelId,
+  targetChannelId,
+  position = 'before',
+) => {
+  if (!sourceChannelId || !targetChannelId || sourceChannelId === targetChannelId) {
+    return channels;
+  }
+  const sourceIndex = channels.findIndex(
+    (item) => item.channel_id === sourceChannelId,
+  );
+  if (sourceIndex < 0) {
+    return channels;
+  }
+  const nextChannels = [...channels];
+  const [moved] = nextChannels.splice(sourceIndex, 1);
+  let insertIndex = nextChannels.findIndex(
+    (item) => item.channel_id === targetChannelId,
+  );
+  if (insertIndex < 0) {
+    return channels;
+  }
+  if (position === 'after') {
+    insertIndex += 1;
+  }
+  nextChannels.splice(insertIndex, 0, moved);
+  return normalizeDraftChannels(nextChannels);
+};
+
 const buildDraftSignature = (channels = []) =>
   normalizeDraftChannels(channels).map((channel) => ({
     channel_id: channel.channel_id,
@@ -178,6 +208,15 @@ export const useModelChannelCircuitData = () => {
     });
   }, []);
 
+  const reorderDraftChannel = useCallback(
+    (sourceChannelId, targetChannelId, position = 'before') => {
+      setDraftChannels((current) =>
+        reorderDraftChannels(current, sourceChannelId, targetChannelId, position),
+      );
+    },
+    [],
+  );
+
   const toggleDraftManualEnabled = useCallback((channelId) => {
     setDraftChannels((current) =>
       normalizeDraftChannels(
@@ -294,6 +333,7 @@ export const useModelChannelCircuitData = () => {
     refresh: loadModels,
     refreshCurrentDetail,
     moveDraftChannel,
+    reorderDraftChannel,
     toggleDraftManualEnabled,
     resetDraft,
     savePolicies,

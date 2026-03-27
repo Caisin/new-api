@@ -45,6 +45,7 @@ const EditModelChannelPolicyModal = ({
   resetDraft,
   savePolicies,
   moveDraftChannel,
+  reorderDraftChannel,
   toggleDraftManualEnabled,
   runChannelAction,
   actionLoadingKey,
@@ -124,6 +125,7 @@ const EditModelChannelPolicyModal = ({
           channels={channels}
           detailLoading={detailLoading}
           moveDraftChannel={moveDraftChannel}
+          reorderDraftChannel={reorderDraftChannel}
           toggleDraftManualEnabled={toggleDraftManualEnabled}
           runChannelAction={runChannelAction}
           actionLoadingKey={actionLoadingKey}

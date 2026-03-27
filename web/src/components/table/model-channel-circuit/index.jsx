@@ -46,6 +46,7 @@ const ModelChannelCircuitPage = () => {
         resetDraft={circuitData.resetDraft}
         savePolicies={circuitData.savePolicies}
         moveDraftChannel={circuitData.moveDraftChannel}
+        reorderDraftChannel={circuitData.reorderDraftChannel}
         toggleDraftManualEnabled={circuitData.toggleDraftManualEnabled}
         runChannelAction={circuitData.runChannelAction}
         actionLoadingKey={circuitData.actionLoadingKey}

@@ -44,6 +44,8 @@ const OperationSetting = () => {
     QuotaPerUnit: 0,
     USDExchangeRate: 0,
     RetryTimes: 0,
+    'model_channel_circuit_setting.failure_threshold': 3,
+    'model_channel_circuit_setting.probe_interval_minutes': 5,
     'general_setting.quota_display_type': 'USD',
     DisplayTokenStatEnabled: false,
     DefaultCollapseSidebar: false,

@@ -17,8 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useMemo } from 'react';
-import { Button, Space, Tag, Typography } from '@douyinfe/semi-ui';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Button, Space, Tag, Tooltip, Typography } from '@douyinfe/semi-ui';
+import { GripVertical } from 'lucide-react';
 import CardTable from '../../common/ui/CardTable';
 import { timestamp2string } from '../../../helpers';
 
@@ -29,17 +30,37 @@ const renderTimestamp = (timestamp, t) => {
   return <Text>{timestamp2string(timestamp)}</Text>;
 };
 
-const renderStatusTag = (status, t) => {
+const renderStatusTag = (status, reason, t) => {
+  let tag = <Tag>{status || '-'}</Tag>;
   switch (status) {
     case 'enabled':
-      return <Tag color='green'>{t('已启用')}</Tag>;
+      tag = <Tag color='green'>{t('已启用')}</Tag>;
+      break;
     case 'auto_disabled':
-      return <Tag color='orange'>{t('自动熔断')}</Tag>;
+      tag = <Tag color='orange'>{t('自动熔断')}</Tag>;
+      break;
     case 'manual_disabled':
-      return <Tag color='red'>{t('手动禁用')}</Tag>;
+      tag = <Tag color='red'>{t('手动禁用')}</Tag>;
+      break;
     default:
-      return <Tag>{status || '-'}</Tag>;
+      break;
   }
+
+  if (!reason) {
+    return tag;
+  }
+
+  return (
+    <Tooltip
+      content={
+        <div style={{ maxWidth: 320, wordBreak: 'break-all' }}>
+          {t('原因')}: {reason}
+        </div>
+      }
+    >
+      <span>{tag}</span>
+    </Tooltip>
+  );
 };
 
 const renderManualTag = (enabled, t) => {
@@ -54,17 +75,80 @@ const ModelChannelCircuitDetailTable = ({
   channels,
   detailLoading,
   moveDraftChannel,
+  reorderDraftChannel,
   toggleDraftManualEnabled,
   runChannelAction,
   actionLoadingKey,
   t,
 }) => {
+  const [draggedChannelId, setDraggedChannelId] = useState(0);
+  const [dragOverChannelId, setDragOverChannelId] = useState(0);
+  const [dragOverPosition, setDragOverPosition] = useState('before');
+
+  const resetDragState = useCallback(() => {
+    setDraggedChannelId(0);
+    setDragOverChannelId(0);
+    setDragOverPosition('before');
+  }, []);
+
+  const handleDragStart = useCallback((event, channelId) => {
+    setDraggedChannelId(channelId);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(channelId));
+  }, []);
+
+  const handleDragOver = useCallback(
+    (event, channelId) => {
+      event.preventDefault();
+      if (!draggedChannelId || draggedChannelId === channelId) {
+        return;
+      }
+      const rect = event.currentTarget.getBoundingClientRect();
+      const position =
+        event.clientY - rect.top > rect.height / 2 ? 'after' : 'before';
+      setDragOverChannelId(channelId);
+      setDragOverPosition(position);
+      event.dataTransfer.dropEffect = 'move';
+    },
+    [draggedChannelId],
+  );
+
+  const handleDrop = useCallback(
+    (event, channelId) => {
+      event.preventDefault();
+      const sourceChannelId = Number(
+        draggedChannelId || event.dataTransfer.getData('text/plain'),
+      );
+      const position =
+        dragOverChannelId === channelId ? dragOverPosition : 'before';
+      reorderDraftChannel(sourceChannelId, channelId, position);
+      resetDragState();
+    },
+    [
+      dragOverChannelId,
+      dragOverPosition,
+      draggedChannelId,
+      reorderDraftChannel,
+      resetDragState,
+    ],
+  );
+
   const columns = useMemo(
     () => [
       {
         title: t('顺位'),
         dataIndex: 'order',
-        render: (_, __, index) => <Tag color='blue'>#{index + 1}</Tag>,
+        render: (_, record, index) => (
+          <div className='flex items-center gap-2'>
+            <Tag color='blue'>#{index + 1}</Tag>
+            <span
+              className='inline-flex cursor-grab text-[var(--semi-color-text-2)]'
+              title={t('拖动排序')}
+            >
+              <GripVertical size={16} />
+            </span>
+          </div>
+        ),
       },
       {
         title: t('渠道'),
@@ -95,7 +179,8 @@ const ModelChannelCircuitDetailTable = ({
       {
         title: t('运行状态'),
         dataIndex: 'status',
-        render: (value) => renderStatusTag(value, t),
+        render: (value, record) =>
+          renderStatusTag(value, record.disable_reason, t),
       },
       {
         title: t('失败次数'),
@@ -103,63 +188,61 @@ const ModelChannelCircuitDetailTable = ({
         render: (value) => value || 0,
       },
       {
-        title: t('原因'),
-        dataIndex: 'disable_reason',
-        render: (value) => value || '-',
-      },
-      {
-        title: t('下次探测'),
-        dataIndex: 'probe_after_at',
-        render: (value) => renderTimestamp(value, t),
-      },
-      {
         title: t('最近失败'),
         dataIndex: 'last_failure_at',
-        render: (value) => renderTimestamp(value, t),
+        render: (value, record) => {
+          const timestampNode = renderTimestamp(value, t);
+          if (!record.probe_after_at) {
+            return timestampNode;
+          }
+          return (
+            <Tooltip
+              content={
+                <div style={{ lineHeight: 1.6 }}>
+                  <div>
+                    {t('最近失败')}: {value ? timestamp2string(value) : '-'}
+                  </div>
+                  <div>
+                    {t('下次探测')}: {timestamp2string(record.probe_after_at)}
+                  </div>
+                </div>
+              }
+            >
+              <span>{timestampNode}</span>
+            </Tooltip>
+          );
+        },
       },
       {
         title: t('操作'),
         dataIndex: 'operate',
-        render: (_, record, index) => (
+        render: (_, record) => (
           <Space wrap>
-            <Button
-              size='small'
-              disabled={index === 0}
-              onClick={() => moveDraftChannel(record.channel_id, 'up')}
-            >
-              {t('上移')}
-            </Button>
-            <Button
-              size='small'
-              disabled={index === channels.length - 1}
-              onClick={() => moveDraftChannel(record.channel_id, 'down')}
-            >
-              {t('下移')}
-            </Button>
             <Button
               size='small'
               type='tertiary'
               disabled={record.channel_missing}
               onClick={() => toggleDraftManualEnabled(record.channel_id)}
             >
-              {record.manual_enabled ? t('设为策略禁用') : t('设为策略启用')}
+              {record.manual_enabled ? t('关策略') : t('开策略')}
             </Button>
             <Button
               size='small'
+              type={record.status === 'manual_disabled' ? 'primary' : 'danger'}
+              theme={record.status === 'manual_disabled' ? 'solid' : 'light'}
               disabled={record.channel_missing}
-              loading={actionLoadingKey === `enable:${record.channel_id}`}
-              onClick={() => runChannelAction(record.channel_id, 'enable')}
+              loading={
+                actionLoadingKey === `enable:${record.channel_id}` ||
+                actionLoadingKey === `disable:${record.channel_id}`
+              }
+              onClick={() =>
+                runChannelAction(
+                  record.channel_id,
+                  record.status === 'manual_disabled' ? 'enable' : 'disable',
+                )
+              }
             >
-              {t('启用')}
-            </Button>
-            <Button
-              size='small'
-              type='danger'
-              disabled={record.channel_missing}
-              loading={actionLoadingKey === `disable:${record.channel_id}`}
-              onClick={() => runChannelAction(record.channel_id, 'disable')}
-            >
-              {t('禁用')}
+              {record.status === 'manual_disabled' ? t('启用') : t('禁用')}
             </Button>
             <Button
               size='small'
@@ -169,7 +252,7 @@ const ModelChannelCircuitDetailTable = ({
               loading={actionLoadingKey === `probe:${record.channel_id}`}
               onClick={() => runChannelAction(record.channel_id, 'probe')}
             >
-              {t('真实探测')}
+              {t('探测')}
             </Button>
           </Space>
         ),
@@ -177,8 +260,6 @@ const ModelChannelCircuitDetailTable = ({
     ],
     [
       actionLoadingKey,
-      channels.length,
-      moveDraftChannel,
       runChannelAction,
       t,
       toggleDraftManualEnabled,
@@ -194,6 +275,29 @@ const ModelChannelCircuitDetailTable = ({
       hidePagination={true}
       scroll={{ x: 'max-content' }}
       size='middle'
+      onRow={(record) => {
+        const isDragging = record.channel_id === draggedChannelId;
+        const isDropTarget =
+          record.channel_id === dragOverChannelId &&
+          draggedChannelId &&
+          draggedChannelId !== record.channel_id;
+        return {
+          draggable: channels.length > 1,
+          onDragStart: (event) => handleDragStart(event, record.channel_id),
+          onDragOver: (event) => handleDragOver(event, record.channel_id),
+          onDrop: (event) => handleDrop(event, record.channel_id),
+          onDragEnd: resetDragState,
+          style: {
+            cursor: channels.length > 1 ? 'grab' : 'default',
+            opacity: isDragging ? 0.55 : 1,
+            boxShadow: isDropTarget
+              ? `inset 0 ${
+                  dragOverPosition === 'before' ? '3px 0 0 0' : '-3px 0 0 0'
+                } var(--semi-color-primary)`
+              : undefined,
+          },
+        };
+      }}
     />
   );
 };
